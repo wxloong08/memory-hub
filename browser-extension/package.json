@@ -1,0 +1,11 @@
+{
+  "name": "claude-memory-collector",
+  "version": "1.0.0",
+  "description": "Manual multi-platform AI conversation sync extension for Memory Hub",
+  "author": "Claude Memory System Team",
+  "license": "MIT",
+  "scripts": {
+    "build": "echo 'No build step required for Manifest V3'",
+    "test": "node --check background.js && node --check content_script.js && node --check popup.js && node --check core/extractor.js && node --check platforms/claude.js && node --check platforms/chatgpt.js && node --check platforms/gemini.js && node --check platforms/grok.js && node --check platforms/deepseek.js"
+  }
+}
