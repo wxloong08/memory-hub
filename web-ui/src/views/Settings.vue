@@ -280,9 +280,10 @@
                       <button
                         v-if="editingMemoryId !== memory.id"
                         @click="removeMemoryRecord(memory.id)"
-                        class="rounded-full bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700 ring-1 ring-rose-200 transition-colors hover:bg-rose-100"
+                        :disabled="deletingMemoryId === memory.id"
+                        class="rounded-full bg-rose-50 px-3 py-1.5 text-xs font-medium text-rose-700 ring-1 ring-rose-200 transition-colors hover:bg-rose-100 disabled:opacity-50 disabled:cursor-not-allowed"
                       >
-                        {{ t('deleteMemory') }}
+                        {{ deletingMemoryId === memory.id ? t('deletingMemory') : t('deleteMemory') }}
                       </button>
                       <template v-else>
                         <button
@@ -1402,13 +1403,15 @@ async function checkConnection() {
   try {
     connected.value = await api.checkHealth()
     if (connected.value) {
-      await loadAIStatus()
-      await loadMemories()
-      await loadComparisonConversations()
-      await loadMemorySuggestions()
-      await loadMemoryConflicts()
-      await loadMemoryCleanupSuggestions()
-      await loadBackupSettings()
+      await Promise.allSettled([
+        loadAIStatus(),
+        loadMemories(),
+        loadComparisonConversations(),
+        loadMemorySuggestions(),
+        loadMemoryConflicts(),
+        loadMemoryCleanupSuggestions(),
+        loadBackupSettings(),
+      ])
     }
   } finally {
     checkingConnection.value = false
@@ -1420,7 +1423,7 @@ async function loadAIStatus() {
     const status = await api.getAIStatus()
     aiAvailable.value = Boolean(status.available)
     aiProvider.value = status.provider || 'Configured'
-    aiMessage.value = status.config_path ? `Config path: ${status.config_path}` : ''
+    aiMessage.value = status.config_path ? t('configPath', { path: status.config_path }) : ''
   } catch (_) {
     aiAvailable.value = false
     aiProvider.value = 'Unknown'
@@ -1435,10 +1438,10 @@ async function reloadAI() {
     aiAvailable.value = Boolean(result.available)
     aiProvider.value = result.provider || 'Unknown'
     aiMessage.value = result.available
-      ? `Reloaded successfully. Active provider: ${aiProvider.value}`
-      : 'Reloaded successfully. Backend is still using fallback mode.'
+      ? t('reloadSuccess', { provider: aiProvider.value })
+      : t('reloadFallback')
   } catch (e) {
-    aiMessage.value = `Reload failed: ${e.message}`
+    aiMessage.value = t('reloadFailed', { message: e.message })
   } finally {
     reloadingAI.value = false
   }
@@ -1450,10 +1453,19 @@ async function viewStats() {
     const stats = await api.getStats()
     rawJson.value = JSON.stringify(stats, null, 2)
   } catch (e) {
-    rawJson.value = `Failed to load: ${e.message}`
+    rawJson.value = t('statsLoadFailed', { message: e.message })
   } finally {
     loadingStats.value = false
   }
+}
+
+async function refreshAllMemoryData() {
+  await Promise.allSettled([
+    loadMemories(),
+    loadMemorySuggestions(),
+    loadMemoryConflicts(),
+    loadMemoryCleanupSuggestions(),
+  ])
 }
 
 async function loadMemories() {
@@ -1512,10 +1524,7 @@ async function archiveSelectedCleanupSuggestions() {
     }
     memoryMessage.value = t('archiveSelectedSuggestedMemoriesDone', { count: selectedCleanupMemoryIds.value.length })
     selectedCleanupMemoryIds.value = []
-    await loadMemories()
-    await loadMemorySuggestions()
-    await loadMemoryConflicts()
-    await loadMemoryCleanupSuggestions()
+    await refreshAllMemoryData()
   } catch (e) {
     memoryMessage.value = t('archiveSelectedSuggestedMemoriesFailed', { message: e.message })
   } finally {
@@ -1607,10 +1616,7 @@ async function addMemoryRecord() {
     })
     memoryForm.value.key = ''
     memoryForm.value.value = ''
-    await loadMemories()
-    await loadMemorySuggestions()
-    await loadMemoryConflicts()
-    await loadMemoryCleanupSuggestions()
+    await refreshAllMemoryData()
   } catch (e) {
     memoryMessage.value = t('addMemoryFailed', { message: e.message })
   } finally {
@@ -1645,10 +1651,7 @@ async function saveMemoryRecord(memoryId) {
     })
     memoryMessage.value = t('updateMemoryDone')
     editingMemoryId.value = null
-    await loadMemories()
-    await loadMemorySuggestions()
-    await loadMemoryConflicts()
-    await loadMemoryCleanupSuggestions()
+    await refreshAllMemoryData()
   } catch (e) {
     memoryMessage.value = t('updateMemoryFailed', { message: e.message })
   } finally {
@@ -1665,10 +1668,7 @@ async function setMemoryStatus(memoryId, status) {
     if (editingMemoryId.value === memoryId) {
       cancelEditingMemory()
     }
-    await loadMemories()
-    await loadMemorySuggestions()
-    await loadMemoryConflicts()
-    await loadMemoryCleanupSuggestions()
+    await refreshAllMemoryData()
   } catch (e) {
     memoryMessage.value = t('updateMemoryStatusFailed', { message: e.message })
   } finally {
@@ -1682,10 +1682,7 @@ async function setMemoryPriority(memoryId, priority) {
   try {
     await api.updateMemoryPriority(memoryId, priority)
     memoryMessage.value = priority > 0 ? t('pinMemoryDone') : t('unpinMemoryDone')
-    await loadMemories()
-    await loadMemorySuggestions()
-    await loadMemoryConflicts()
-    await loadMemoryCleanupSuggestions()
+    await refreshAllMemoryData()
   } catch (e) {
     memoryMessage.value = t('updateMemoryPriorityFailed', { message: e.message })
   } finally {
@@ -1722,10 +1719,7 @@ async function mergeMemorySuggestion(item, index, deleteSources = false) {
       delete_sources: Boolean(deleteSources),
     })
     memoryMessage.value = deleteSources ? t('mergeMemoryAndDeleteDone') : t('mergeMemoryDone')
-    await loadMemories()
-    await loadMemorySuggestions()
-    await loadMemoryConflicts()
-    await loadMemoryCleanupSuggestions()
+    await refreshAllMemoryData()
   } catch (e) {
     memoryMessage.value = t('mergeMemoryFailed', { message: e.message })
   } finally {
@@ -1750,10 +1744,7 @@ async function resolveMemoryConflict(item, index, action) {
     } else {
       memoryMessage.value = t('resolveConflictMergeDone')
     }
-    await loadMemories()
-    await loadMemorySuggestions()
-    await loadMemoryConflicts()
-    await loadMemoryCleanupSuggestions()
+    await refreshAllMemoryData()
   } catch (e) {
     memoryMessage.value = t('resolveConflictFailed', { message: e.message })
   } finally {
@@ -1761,18 +1752,20 @@ async function resolveMemoryConflict(item, index, action) {
   }
 }
 
+const deletingMemoryId = ref(null)
+
 async function removeMemoryRecord(memoryId) {
   if (!window.confirm(t('deleteMemoryConfirm'))) {
     return
   }
+  deletingMemoryId.value = memoryId
   try {
     await api.deleteMemory(memoryId)
-    await loadMemories()
-    await loadMemorySuggestions()
-    await loadMemoryConflicts()
-    await loadMemoryCleanupSuggestions()
+    await refreshAllMemoryData()
   } catch (e) {
     memoryMessage.value = t('deleteMemoryFailed', { message: e.message })
+  } finally {
+    deletingMemoryId.value = null
   }
 }
 

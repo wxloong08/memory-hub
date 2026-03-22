@@ -141,7 +141,7 @@ const messages = {
     exportTarget: '目标客户端',
     workspacePath: '工作区路径',
     workspacePathPlaceholder: '例如 D:\\python project\\my-app',
-    loadTargetsFailed: '加载导出目标失败',
+    loadTargetsFailed: '加载导出目标失败: {message}',
     exportPreview: '预览',
     preview: '预览',
     previewReady: '预览已生成，可直接复制或写入工作区。',
@@ -267,6 +267,15 @@ const messages = {
     noMemoriesInSection: '这个分组下还没有记忆。',
     loadMemoriesFailed: '加载记忆失败: {message}',
     addMemoryFailed: '新增记忆失败: {message}',
+    addMemoryDone: '记忆已成功添加。',
+    connectionFailed: '连接失败: {message}',
+    reloadSuccess: '重新加载成功。当前提供方: {provider}',
+    reloadFallback: '重新加载成功。后端仍在使用回退模式。',
+    reloadFailed: '重新加载失败: {message}',
+    configPath: '配置路径: {path}',
+    statsLoadFailed: '加载失败: {message}',
+    searchFailed: '搜索失败: {message}',
+    similarityMatch: '{percent}% 匹配',
     updateMemoryDone: '固定记忆已更新。',
     updateMemoryFailed: '更新记忆失败: {message}',
     pinMemoryDone: '固定记忆已置顶，导出时会优先注入。',
@@ -278,6 +287,7 @@ const messages = {
     restoreMemoryDone: '固定记忆已恢复启用。',
     updateMemoryStatusFailed: '更新记忆状态失败: {message}',
     deleteMemory: '删除记忆',
+    deletingMemory: '删除中…',
     deleteMemoryConfirm: '确定删除这条固定记忆吗？',
     deleteMemoryFailed: '删除记忆失败: {message}',
     noMemoriesYet: '还没有固定记忆。',
@@ -557,7 +567,7 @@ const messages = {
     exportTarget: 'Target client',
     workspacePath: 'Workspace path',
     workspacePathPlaceholder: 'For example D:\\python project\\my-app',
-    loadTargetsFailed: 'Failed to load export targets',
+    loadTargetsFailed: 'Failed to load export targets: {message}',
     exportPreview: 'Preview',
     preview: 'Preview',
     previewReady: 'Preview generated. You can copy it or write it into a workspace now.',
@@ -683,6 +693,15 @@ const messages = {
     noMemoriesInSection: 'No memories in this section yet.',
     loadMemoriesFailed: 'Failed to load memories: {message}',
     addMemoryFailed: 'Failed to add memory: {message}',
+    addMemoryDone: 'Memory added successfully.',
+    connectionFailed: 'Connection failed: {message}',
+    reloadSuccess: 'Reloaded successfully. Active provider: {provider}',
+    reloadFallback: 'Reloaded successfully. Backend is still using fallback mode.',
+    reloadFailed: 'Reload failed: {message}',
+    configPath: 'Config path: {path}',
+    statsLoadFailed: 'Failed to load: {message}',
+    searchFailed: 'Search failed: {message}',
+    similarityMatch: '{percent}% match',
     updateMemoryDone: 'Pinned memory updated.',
     updateMemoryFailed: 'Failed to update memory: {message}',
     pinMemoryDone: 'Pinned memory promoted. It will be prioritized during exports.',
@@ -694,6 +713,7 @@ const messages = {
     restoreMemoryDone: 'Pinned memory restored to active use.',
     updateMemoryStatusFailed: 'Failed to update memory status: {message}',
     deleteMemory: 'Delete memory',
+    deletingMemory: 'Deleting…',
     deleteMemoryConfirm: 'Delete this pinned memory?',
     deleteMemoryFailed: 'Failed to delete memory: {message}',
     noMemoriesYet: 'No pinned memories yet.',
@@ -875,7 +895,11 @@ export function useI18n() {
       return ''
     }
 
-    return new Date(value).toLocaleString(locale.value === 'en' ? 'en-US' : 'zh-CN', {
+    const date = new Date(value)
+    if (isNaN(date.getTime())) {
+      return String(value)
+    }
+    return date.toLocaleString(locale.value === 'en' ? 'en-US' : 'zh-CN', {
       year: 'numeric',
       month: '2-digit',
       day: '2-digit',

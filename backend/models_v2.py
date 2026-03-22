@@ -148,6 +148,17 @@ class SwitchInput(BaseModel):
     from_session_id: Optional[str] = None
     token_budget: Optional[int] = Field(default=None, gt=0)
     include_archive_turns: Optional[int] = Field(default=None, ge=0)
+    conversation_ids: Optional[list[str]] = None
+    custom_context: Optional[str] = None
+
+
+class SwitchPreviewInput(BaseModel):
+    """CLI switch preview request."""
+    to_cli: str = Field(min_length=1)
+    workspace_path: str = Field(min_length=1)
+    token_budget: Optional[int] = Field(default=None, gt=0)
+    conversation_ids: Optional[list[str]] = None
+    custom_context: Optional[str] = None
 
 
 class SwitchResponse(BaseModel):

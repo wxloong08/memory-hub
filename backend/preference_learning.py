@@ -126,6 +126,11 @@ class PreferenceLearning:
         """保存偏好到数据库"""
         conn = sqlite3.connect(self.db_path)
         cursor = conn.cursor()
+        preference_columns = {row[1] for row in conn.execute("PRAGMA table_info(preferences)").fetchall()}
+        has_priority = "priority" in preference_columns
+        has_client_rules = "client_rules" in preference_columns
+        has_status = "status" in preference_columns
+        seen: set[tuple] = set()
 
         for pref in preferences:
             # 确定分类
@@ -139,18 +144,64 @@ class PreferenceLearning:
             else:
                 category = 'general'
 
-            # 插入或更新偏好
-            cursor.execute("""
-                INSERT OR REPLACE INTO preferences
-                (category, key, value, confidence, last_updated)
-                VALUES (?, ?, ?, ?, ?)
-            """, (
-                category,
-                pref['type'],
-                pref['statement'][:200],  # 限制长度
-                0.7,  # 初始置信度
-                datetime.now()
-            ))
+            key = pref['type']
+            value = pref['statement'][:200]
+            confidence = 0.7
+            priority = 0
+            client_rules = "{}"
+            status = "active"
+            dedupe_key = (category, key, value)
+            if dedupe_key in seen:
+                continue
+            seen.add(dedupe_key)
+
+            where_clauses = [
+                "COALESCE(category, '') = COALESCE(?, '')",
+                "COALESCE(key, '') = COALESCE(?, '')",
+                "COALESCE(value, '') = COALESCE(?, '')",
+            ]
+            where_params: list = [category, key, value]
+
+            existing = cursor.execute(
+                f"SELECT id FROM preferences WHERE {' AND '.join(where_clauses)} LIMIT 1",
+                tuple(where_params),
+            ).fetchone()
+            if existing:
+                continue
+
+            if has_priority and has_client_rules and has_status:
+                cursor.execute(
+                    """
+                    INSERT INTO preferences
+                    (category, key, value, confidence, priority, client_rules, status, last_updated)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        category,
+                        key,
+                        value,
+                        confidence,
+                        priority,
+                        client_rules,
+                        status,
+                        datetime.now().isoformat(),
+                    ),
+                )
+            else:
+                cursor.execute(
+                    """
+                    INSERT INTO preferences
+                    (category, key, value, confidence, last_updated)
+                    VALUES (?, ?, ?, ?, ?)
+                    """,
+                    (
+                        category,
+                        key,
+                        value,
+                        confidence,
+                        datetime.now().isoformat(),
+                    ),
+                )
 
         conn.commit()
         conn.close()

@@ -1,5 +1,5 @@
 <template>
-  <section class="space-y-5" @click="handleContentClick">
+  <section class="space-y-5">
     <router-link
       to="/conversations"
       class="inline-flex items-center gap-2 rounded-full bg-white/82 px-4 py-2 text-sm font-medium text-stone-700 shadow-sm ring-1 ring-stone-200/70 transition-colors hover:text-stone-900"
@@ -15,6 +15,10 @@
     </div>
 
     <template v-else-if="conversation">
+      <div v-if="actionError" class="rounded-[22px] border border-rose-200 bg-rose-50 px-5 py-4 text-sm text-rose-700">
+        {{ actionError }}
+      </div>
+
       <div class="rounded-[26px] border border-stone-200/60 bg-[rgba(255,253,248,0.52)] p-5 shadow-[0_8px_22px_rgba(71,52,31,0.03)] lg:p-6">
         <div class="min-w-0">
           <div class="flex flex-wrap items-center gap-2">
@@ -572,6 +576,7 @@ import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '../api/memory-hub.js'
 import { platformEmoji, platformClass } from '../constants/platforms.js'
+import DOMPurify from 'dompurify'
 import { useI18n } from '../composables/useI18n.js'
 
 const route = useRoute()
@@ -583,6 +588,7 @@ const conversationMemories = ref([])
 const loading = ref(true)
 const loadingRelated = ref(true)
 const error = ref(null)
+const actionError = ref(null)
 const showContent = ref(false)
 const showDetails = ref(false)
 const analyzing = ref(false)
@@ -611,6 +617,7 @@ const selectedMemoryTier = ref('temporary')
 const extractingMemories = ref(false)
 const memoryActionMessage = ref('')
 let transcriptObserver = null
+let loadRequestId = 0
 const { t, formatDateTime } = useI18n()
 
 const parsedMessages = computed(() => parseMessages(conversation.value?.full_content || ''))
@@ -724,7 +731,7 @@ function getAssistantLabel(record) {
     codex: 'Codex',
     antigravity: 'Antigravity',
   }
-  return platformLabels[platform] || 'Assistant'
+  return platformLabels[platform] || t('assistant')
 }
 
 function parseMessages(fullContent) {
@@ -937,7 +944,7 @@ async function loadExportClients() {
       selectedExportClient.value = exportClients.value[0].client
     }
   } catch (e) {
-    exportError.value = `${t('loadTargetsFailed')}: ${e.message}`
+    exportError.value = t('loadTargetsFailed', { message: e.message })
   }
 }
 
@@ -1018,6 +1025,7 @@ async function applyExport() {
 }
 
 async function loadData(id) {
+  const thisRequest = ++loadRequestId
   loading.value = true
   loadingRelated.value = true
   error.value = null
@@ -1037,31 +1045,42 @@ async function loadData(id) {
   selectedExportMemoryIds.value = []
   visibleMessageLimit.value = messagePageSize
   try {
-    conversation.value = await api.getConversation(id)
-    selectedMemoryTier.value = String(conversation.value?.memory_tier || 'temporary')
+    const conv = await api.getConversation(id)
+    if (thisRequest !== loadRequestId) return
+    conversation.value = conv
+    selectedMemoryTier.value = String(conv?.memory_tier || 'temporary')
   } catch (e) {
+    if (thisRequest !== loadRequestId) return
     error.value = `Failed to load conversation: ${e.message}`
   } finally {
-    loading.value = false
+    if (thisRequest === loadRequestId) loading.value = false
   }
+  if (thisRequest !== loadRequestId) return
   try {
     const result = await api.getRelated(id)
+    if (thisRequest !== loadRequestId) return
     related.value = result.related || result || []
   } catch {
+    if (thisRequest !== loadRequestId) return
     related.value = []
   } finally {
-    loadingRelated.value = false
+    if (thisRequest === loadRequestId) loadingRelated.value = false
   }
+  if (thisRequest !== loadRequestId) return
   try {
     const memoryResult = await api.getConversationMemories(id)
+    if (thisRequest !== loadRequestId) return
     conversationMemories.value = memoryResult.memories || []
   } catch {
+    if (thisRequest !== loadRequestId) return
     conversationMemories.value = []
   }
 }
 
 async function updateMemoryTier() {
   if (!route.params.id) return
+  const previousTier = conversation.value?.memory_tier || 'temporary'
+  actionError.value = null
   try {
     const result = await api.updateConversationMemoryTier(route.params.id, selectedMemoryTier.value)
     conversation.value = {
@@ -1069,14 +1088,15 @@ async function updateMemoryTier() {
       memory_tier: result.memory_tier,
     }
   } catch (e) {
-    error.value = t('updateMemoryTierFailed', { message: e.message })
+    selectedMemoryTier.value = previousTier
+    actionError.value = t('updateMemoryTierFailed', { message: e.message })
   }
 }
 
 async function extractMemories() {
   if (!route.params.id || extractingMemories.value) return
   extractingMemories.value = true
-  error.value = null
+  actionError.value = null
   memoryActionMessage.value = ''
   try {
     const result = await api.extractMemoriesFromConversation(route.params.id)
@@ -1087,7 +1107,7 @@ async function extractMemories() {
     const memoryResult = await api.getConversationMemories(route.params.id)
     conversationMemories.value = memoryResult.memories || []
   } catch (e) {
-    error.value = t('extractMemoriesFailed', { message: e.message })
+    actionError.value = t('extractMemoriesFailed', { message: e.message })
   } finally {
     extractingMemories.value = false
   }
@@ -1118,20 +1138,19 @@ async function deleteCurrentConversation() {
   if (!confirmed) return
 
   deleting.value = true
-  error.value = null
+  actionError.value = null
   try {
     await api.deleteConversation(route.params.id)
     await router.push('/conversations')
   } catch (e) {
-    error.value = t('deleteConversationFailed', { message: e.message })
+    actionError.value = t('deleteConversationFailed', { message: e.message })
   } finally {
     deleting.value = false
   }
 }
 
 onMounted(async () => {
-  await loadExportClients()
-  await loadExportMemories()
+  await Promise.allSettled([loadExportClients(), loadExportMemories()])
   await loadData(route.params.id)
   setupTranscriptObserver()
 })

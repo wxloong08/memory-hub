@@ -178,8 +178,8 @@ async def _backup_scheduler_loop():
     while True:
         try:
             run_scheduled_backup_if_due(db.conn, DATA_DIR)
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[backup_scheduler] Error: {e}")
         await asyncio.sleep(300)
 
 class ConversationInput(BaseModel):
@@ -871,6 +871,62 @@ def _normalize_client_rules(raw_rules) -> dict[str, str]:
     return normalized
 
 
+def _serialize_client_rules(raw_rules) -> str:
+    return json.dumps(_normalize_client_rules(raw_rules), ensure_ascii=False, sort_keys=True)
+
+
+def _upsert_preference_exact(
+    *,
+    category: str,
+    key: str,
+    value: str,
+    confidence: float,
+    priority: int,
+    client_rules_json: str,
+    status: str,
+) -> tuple[int, bool]:
+    # Check for existing record with same semantic identity (category+key+value)
+    row = db.conn.execute(
+        """
+        SELECT id
+        FROM preferences
+        WHERE
+            COALESCE(category, '') = COALESCE(?, '')
+            AND COALESCE(key, '') = COALESCE(?, '')
+            AND COALESCE(value, '') = COALESCE(?, '')
+        ORDER BY id ASC
+        LIMIT 1
+        """,
+        (category, key, value),
+    ).fetchone()
+
+    if row:
+        # Update mutable fields on existing record
+        memory_id = int(row["id"])
+        db.conn.execute(
+            """
+            UPDATE preferences
+            SET confidence = MAX(confidence, ?),
+                priority = MAX(priority, ?),
+                client_rules = ?,
+                last_updated = ?
+            WHERE id = ?
+            """,
+            (confidence, priority, client_rules_json, datetime.now().isoformat(), memory_id),
+        )
+        return memory_id, False
+
+    # Insert new record
+    cursor = db.conn.execute(
+        """
+        INSERT INTO preferences (category, key, value, confidence, priority, client_rules, status, last_updated)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (category, key, value, confidence, priority, client_rules_json, status, datetime.now().isoformat()),
+    )
+    return cursor.lastrowid, True
+
+
 def _build_memory_timeline(memory: dict, sources: list[dict], parent_memories: list[dict]) -> list[dict]:
     timeline: list[dict] = []
     last_updated = str(memory.get("last_updated") or "").strip()
@@ -1108,8 +1164,8 @@ async def get_context(
             ], pinned_memories=pinned_memories[:12])
             if ai_context:
                 context = f"# AI-Synthesized Context\n\n{ai_context}\n\n---\n\n{context}"
-        except Exception:
-            pass
+        except Exception as e:
+            print(f"[ai_context] Generation failed: {e}")
 
     return {"context": context}
 
@@ -1327,21 +1383,15 @@ async def resolve_memory_conflict(payload: MemoryConflictResolutionInput):
             elif merged_rules.get(client_id) != "include":
                 merged_rules[client_id] = rule
 
-        cursor = db.conn.execute(
-            """
-            INSERT INTO preferences (category, key, value, confidence, priority, client_rules, status, last_updated)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-            """,
-            (
-                category,
-                key,
-                merged_value[:1000],
-                merged_confidence,
-                max(int(left.get("priority") or 0), int(right.get("priority") or 0)),
-                json.dumps(merged_rules, ensure_ascii=False),
-                "active",
-                datetime.now().isoformat(),
-            ),
+        merged_priority = max(int(left.get("priority") or 0), int(right.get("priority") or 0))
+        merged_memory_id, _ = _upsert_preference_exact(
+            category=category,
+            key=key,
+            value=merged_value[:1000],
+            confidence=merged_confidence,
+            priority=merged_priority,
+            client_rules_json=_serialize_client_rules(merged_rules),
+            status="active",
         )
 
         source_rows = db.conn.execute(
@@ -1357,19 +1407,21 @@ async def resolve_memory_conflict(payload: MemoryConflictResolutionInput):
             if row["conversation_id"]:
                 db.conn.execute(
                     """
-                    INSERT INTO preference_sources (memory_id, conversation_id, created_at)
+                    INSERT OR IGNORE INTO preference_sources (memory_id, conversation_id, created_at)
                     VALUES (?, ?, ?)
                     """,
-                    (cursor.lastrowid, row["conversation_id"], datetime.now().isoformat()),
+                    (merged_memory_id, row["conversation_id"], datetime.now().isoformat()),
                 )
 
         for parent_id in (payload.left_id, payload.right_id):
+            if int(parent_id) == merged_memory_id:
+                continue
             db.conn.execute(
                 """
-                INSERT INTO preference_lineage (child_memory_id, parent_memory_id, relation_type, created_at)
+                INSERT OR IGNORE INTO preference_lineage (child_memory_id, parent_memory_id, relation_type, created_at)
                 VALUES (?, ?, ?, ?)
                 """,
-                (cursor.lastrowid, parent_id, "merged", datetime.now().isoformat()),
+                (merged_memory_id, parent_id, "merged", datetime.now().isoformat()),
             )
 
         db.conn.commit()
@@ -1378,12 +1430,14 @@ async def resolve_memory_conflict(payload: MemoryConflictResolutionInput):
             "action": action,
             "kept_memory_id": None,
             "deleted_memory_id": None,
-            "merged_memory_id": cursor.lastrowid,
+            "merged_memory_id": merged_memory_id,
         }
 
     kept_id = payload.left_id if action == "keep_left" else payload.right_id
     deleted_id = payload.right_id if action == "keep_left" else payload.left_id
 
+    db.conn.execute("DELETE FROM preference_lineage WHERE child_memory_id = ? OR parent_memory_id = ?", (deleted_id, deleted_id))
+    db.conn.execute("DELETE FROM preference_usage WHERE memory_id = ?", (deleted_id,))
     db.conn.execute("DELETE FROM preference_sources WHERE memory_id = ?", (deleted_id,))
     cursor = db.conn.execute("DELETE FROM preferences WHERE id = ?", (deleted_id,))
     db.conn.commit()
@@ -1408,19 +1462,25 @@ async def create_memory(payload: PreferenceInput):
 
     if not key or not value:
         raise HTTPException(status_code=400, detail="key and value are required")
+    if len(key) > 500:
+        raise HTTPException(status_code=400, detail="key must be <= 500 characters")
+    if len(value) > 5000:
+        raise HTTPException(status_code=400, detail="value must be <= 5000 characters")
 
-    cursor = db.conn.execute(
-        """
-        INSERT INTO preferences (category, key, value, confidence, priority, client_rules, status, last_updated)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (category, key, value, confidence, 0, "{}", "active", datetime.now().isoformat()),
+    memory_id, _ = _upsert_preference_exact(
+        category=category,
+        key=key,
+        value=value,
+        confidence=confidence,
+        priority=0,
+        client_rules_json=_serialize_client_rules({}),
+        status="active",
     )
     db.conn.commit()
-    return {"status": "ok", "memory_id": cursor.lastrowid}
+    return {"status": "ok", "memory_id": memory_id}
 
 
-@app.post("/api/memories/{memory_id}")
+@app.post("/api/memories/{memory_id:int}")
 async def update_memory(memory_id: int, payload: MemoryUpdateInput):
     _get_memory_record(memory_id)
     category = str(payload.category or "").strip() or "general"
@@ -1430,6 +1490,23 @@ async def update_memory(memory_id: int, payload: MemoryUpdateInput):
 
     if not key or not value:
         raise HTTPException(status_code=400, detail="key and value are required")
+
+    # Check if another record with the same semantic identity already exists
+    existing = db.conn.execute(
+        """
+        SELECT id FROM preferences
+        WHERE COALESCE(category, '') = ? AND COALESCE(key, '') = ?
+          AND COALESCE(value, '') = ?
+          AND id != ?
+        LIMIT 1
+        """,
+        (category, key, value, memory_id),
+    ).fetchone()
+    if existing:
+        raise HTTPException(
+            status_code=409,
+            detail=f"A memory with the same category/key/value already exists (id={existing['id']})",
+        )
 
     cursor = db.conn.execute(
         """
@@ -1446,7 +1523,7 @@ async def update_memory(memory_id: int, payload: MemoryUpdateInput):
     return {"status": "ok", "memory_id": memory_id, "updated": True}
 
 
-@app.post("/api/memories/{memory_id}/status")
+@app.post("/api/memories/{memory_id:int}/status")
 async def update_memory_status(memory_id: int, payload: MemoryStatusInput):
     _get_memory_record(memory_id)
     memory_status = str(payload.status or "").strip().lower()
@@ -1468,7 +1545,7 @@ async def update_memory_status(memory_id: int, payload: MemoryStatusInput):
     return {"status": "ok", "memory_id": memory_id, "memory_status": memory_status}
 
 
-@app.post("/api/memories/{memory_id}/priority")
+@app.post("/api/memories/{memory_id:int}/priority")
 async def update_memory_priority(memory_id: int, payload: MemoryPriorityInput):
     _get_memory_record(memory_id)
     priority = max(0, min(100, int(payload.priority)))
@@ -1488,7 +1565,7 @@ async def update_memory_priority(memory_id: int, payload: MemoryPriorityInput):
     return {"status": "ok", "memory_id": memory_id, "priority": priority}
 
 
-@app.post("/api/memories/{memory_id}/client-rules")
+@app.post("/api/memories/{memory_id:int}/client-rules")
 async def update_memory_client_rules(memory_id: int, payload: MemoryClientRulesInput):
     _get_memory_record(memory_id)
     normalized_rules = _normalize_client_rules(payload.client_rules)
@@ -1528,21 +1605,14 @@ async def merge_memories(payload: MemoryMergeInput):
         elif merged_rules.get(client_id) != "include":
             merged_rules[client_id] = rule
 
-    cursor = db.conn.execute(
-        """
-        INSERT INTO preferences (category, key, value, confidence, priority, client_rules, status, last_updated)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        (
-            category,
-            key,
-            merged_value[:1000],
-            merged_confidence,
-            merged_priority,
-            json.dumps(merged_rules, ensure_ascii=False),
-            "active",
-            datetime.now().isoformat(),
-        ),
+    merged_memory_id, _ = _upsert_preference_exact(
+        category=category,
+        key=key,
+        value=merged_value[:1000],
+        confidence=merged_confidence,
+        priority=merged_priority,
+        client_rules_json=_serialize_client_rules(merged_rules),
+        status="active",
     )
     source_rows = db.conn.execute(
         """
@@ -1557,35 +1627,55 @@ async def merge_memories(payload: MemoryMergeInput):
         if row["conversation_id"]:
             db.conn.execute(
                 """
-                INSERT INTO preference_sources (memory_id, conversation_id, created_at)
+                INSERT OR IGNORE INTO preference_sources (memory_id, conversation_id, created_at)
                 VALUES (?, ?, ?)
                 """,
-                (cursor.lastrowid, row["conversation_id"], datetime.now().isoformat()),
+                (merged_memory_id, row["conversation_id"], datetime.now().isoformat()),
             )
 
     for parent_id in (payload.left_id, payload.right_id):
+        if int(parent_id) == merged_memory_id:
+            continue
         db.conn.execute(
             """
-            INSERT INTO preference_lineage (child_memory_id, parent_memory_id, relation_type, created_at)
+            INSERT OR IGNORE INTO preference_lineage (child_memory_id, parent_memory_id, relation_type, created_at)
             VALUES (?, ?, ?, ?)
             """,
-            (cursor.lastrowid, parent_id, "merged", datetime.now().isoformat()),
+            (merged_memory_id, parent_id, "merged", datetime.now().isoformat()),
         )
 
     deleted_source_ids: list[int] = []
     if payload.delete_sources:
-        db.conn.execute("DELETE FROM preference_sources WHERE memory_id IN (?, ?)", (payload.left_id, payload.right_id))
-        db.conn.execute("DELETE FROM preferences WHERE id IN (?, ?)", (payload.left_id, payload.right_id))
-        deleted_source_ids = [payload.left_id, payload.right_id]
+        candidates = [payload.left_id, payload.right_id]
+        delete_ids = [memory_id for memory_id in candidates if int(memory_id) != merged_memory_id]
+        if delete_ids:
+            placeholders = ",".join("?" for _ in delete_ids)
+            db.conn.execute(
+                f"DELETE FROM preference_lineage WHERE child_memory_id IN ({placeholders}) OR parent_memory_id IN ({placeholders})",
+                (*delete_ids, *delete_ids),
+            )
+            db.conn.execute(
+                f"DELETE FROM preference_usage WHERE memory_id IN ({placeholders})",
+                tuple(delete_ids),
+            )
+            db.conn.execute(
+                f"DELETE FROM preference_sources WHERE memory_id IN ({placeholders})",
+                tuple(delete_ids),
+            )
+            db.conn.execute(
+                f"DELETE FROM preferences WHERE id IN ({placeholders})",
+                tuple(delete_ids),
+            )
+            deleted_source_ids = delete_ids
     db.conn.commit()
 
     return {
         "status": "ok",
-        "merged_memory_id": cursor.lastrowid,
+        "merged_memory_id": merged_memory_id,
         "source_ids": [payload.left_id, payload.right_id],
         "deleted_source_ids": deleted_source_ids,
         "memory": {
-            "id": cursor.lastrowid,
+            "id": merged_memory_id,
             "category": category,
             "key": key,
             "value": merged_value[:1000],
@@ -1596,8 +1686,11 @@ async def merge_memories(payload: MemoryMergeInput):
     }
 
 
-@app.delete("/api/memories/{memory_id}")
+@app.delete("/api/memories/{memory_id:int}")
 async def delete_memory(memory_id: int):
+    db.conn.execute("DELETE FROM preference_lineage WHERE child_memory_id = ? OR parent_memory_id = ?", (memory_id, memory_id))
+    db.conn.execute("DELETE FROM preference_usage WHERE memory_id = ?", (memory_id,))
+    db.conn.execute("DELETE FROM preference_sources WHERE memory_id = ?", (memory_id,))
     cursor = db.conn.execute("DELETE FROM preferences WHERE id = ?", (memory_id,))
     db.conn.commit()
     if cursor.rowcount == 0:
@@ -1629,27 +1722,32 @@ async def extract_memories_from_conversation(conversation_id: str):
             if len(statement) < 4 or normalized in seen:
                 continue
             seen.add(normalized)
-            cursor = db.conn.execute(
-                """
-                INSERT INTO preferences (category, key, value, confidence, priority, status, last_updated)
-                VALUES (?, ?, ?, ?, ?, ?, ?)
-                """,
-                (category, category, statement[:300], 0.72, 0, "active", datetime.now().isoformat()),
+            memory_id, memory_inserted = _upsert_preference_exact(
+                category=category,
+                key=category,
+                value=statement[:300],
+                confidence=0.72,
+                priority=0,
+                client_rules_json=_serialize_client_rules({}),
+                status="active",
             )
-            inserted.append({
-                "id": cursor.lastrowid,
-                "category": category,
-                "key": category,
-                "value": statement[:300],
-                "confidence": 0.72,
-            })
+            source_changes_before = db.conn.total_changes
             db.conn.execute(
                 """
-                INSERT INTO preference_sources (memory_id, conversation_id, created_at)
+                INSERT OR IGNORE INTO preference_sources (memory_id, conversation_id, created_at)
                 VALUES (?, ?, ?)
                 """,
-                (cursor.lastrowid, conversation_id, datetime.now().isoformat()),
+                (memory_id, conversation_id, datetime.now().isoformat()),
             )
+            source_inserted = db.conn.total_changes > source_changes_before
+            if memory_inserted or source_inserted:
+                inserted.append({
+                    "id": memory_id,
+                    "category": category,
+                    "key": category,
+                    "value": statement[:300],
+                    "confidence": 0.72,
+                })
             if len(inserted) >= 12:
                 break
         if len(inserted) >= 12:
@@ -1798,7 +1896,7 @@ async def apply_conversation_export(conversation_id: str, payload: ExportApplyIn
                 continue
             db.conn.execute(
                 """
-                INSERT INTO preference_usage (memory_id, client_id, conversation_id, used_at)
+                INSERT OR IGNORE INTO preference_usage (memory_id, client_id, conversation_id, used_at)
                 VALUES (?, ?, ?, ?)
                 """,
                 (int(memory_id), payload.client, conversation_id, datetime.now().isoformat()),
@@ -2040,7 +2138,7 @@ async def validate_backup(source_path: str):
 # ---------------------------------------------------------------------------
 
 from database_v2 import DatabaseV2
-from models_v2 import SwitchInput, WorkingMemoryInput
+from models_v2 import SwitchInput, SwitchPreviewInput, WorkingMemoryInput
 from switch_engine import (
     execute_switch,
     preview_switch,
@@ -2075,6 +2173,8 @@ async def v2_switch(payload: SwitchInput):
             from_session_id=payload.from_session_id,
             token_budget=payload.token_budget,
             include_archive_turns=payload.include_archive_turns,
+            conversation_ids=payload.conversation_ids,
+            custom_context=payload.custom_context,
             write_file=True,
         )
         return result
@@ -2084,15 +2184,17 @@ async def v2_switch(payload: SwitchInput):
         raise HTTPException(status_code=500, detail=str(exc)) from exc
 
 
-@app.get("/api/v2/switch/preview")
-async def v2_switch_preview(to_cli: str, workspace_path: str, token_budget: Optional[int] = None):
+@app.post("/api/v2/switch/preview")
+async def v2_switch_preview(payload: SwitchPreviewInput):
     """Preview what would be injected (dry run)."""
     try:
         return preview_switch(
             conn=db_v2.conn,
-            to_cli=to_cli,
-            workspace_path=workspace_path,
-            token_budget=token_budget,
+            to_cli=payload.to_cli,
+            workspace_path=payload.workspace_path,
+            token_budget=payload.token_budget,
+            conversation_ids=payload.conversation_ids,
+            custom_context=payload.custom_context,
         )
     except ValueError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc

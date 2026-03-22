@@ -25,6 +25,7 @@ class Database:
         self.db_path = db_path
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
+        self.conn.execute("PRAGMA foreign_keys = ON")
         self._create_schema()
         self._ensure_schema_migrations()
 
@@ -129,6 +130,94 @@ class Database:
         """)
         self.conn.commit()
 
+    def _table_exists(self, table_name: str) -> bool:
+        cursor = self.conn.execute(
+            "SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1",
+            (table_name,),
+        )
+        return cursor.fetchone() is not None
+
+    def _deduplicate_preference_tables(self):
+        if not self._table_exists("preferences"):
+            return
+
+        duplicate_groups = self.conn.execute(
+            """
+            SELECT
+                MIN(id) AS keep_id,
+                GROUP_CONCAT(id) AS grouped_ids
+            FROM preferences
+            GROUP BY
+                COALESCE(category, ''),
+                COALESCE(key, ''),
+                COALESCE(value, '')
+            HAVING COUNT(*) > 1
+            """
+        ).fetchall()
+
+        for row in duplicate_groups:
+            keep_id = int(row["keep_id"])
+            grouped_ids = [int(item) for item in str(row["grouped_ids"] or "").split(",") if item]
+            duplicate_ids = [memory_id for memory_id in grouped_ids if memory_id != keep_id]
+            if not duplicate_ids:
+                continue
+
+            placeholders = ",".join("?" for _ in duplicate_ids)
+
+            if self._table_exists("preference_sources"):
+                self.conn.execute(
+                    f"UPDATE preference_sources SET memory_id = ? WHERE memory_id IN ({placeholders})",
+                    (keep_id, *duplicate_ids),
+                )
+
+            if self._table_exists("preference_lineage"):
+                self.conn.execute(
+                    f"UPDATE preference_lineage SET child_memory_id = ? WHERE child_memory_id IN ({placeholders})",
+                    (keep_id, *duplicate_ids),
+                )
+                self.conn.execute(
+                    f"UPDATE preference_lineage SET parent_memory_id = ? WHERE parent_memory_id IN ({placeholders})",
+                    (keep_id, *duplicate_ids),
+                )
+
+            if self._table_exists("preference_usage"):
+                self.conn.execute(
+                    f"UPDATE preference_usage SET memory_id = ? WHERE memory_id IN ({placeholders})",
+                    (keep_id, *duplicate_ids),
+                )
+
+            self.conn.execute(
+                f"DELETE FROM preferences WHERE id IN ({placeholders})",
+                tuple(duplicate_ids),
+            )
+
+        if self._table_exists("preference_sources"):
+            self.conn.execute(
+                """
+                DELETE FROM preference_sources
+                WHERE id NOT IN (
+                    SELECT MIN(id)
+                    FROM preference_sources
+                    GROUP BY memory_id, conversation_id
+                )
+                """
+            )
+
+        if self._table_exists("preference_lineage"):
+            self.conn.execute(
+                "DELETE FROM preference_lineage WHERE child_memory_id = parent_memory_id"
+            )
+            self.conn.execute(
+                """
+                DELETE FROM preference_lineage
+                WHERE id NOT IN (
+                    SELECT MIN(id)
+                    FROM preference_lineage
+                    GROUP BY child_memory_id, parent_memory_id, COALESCE(relation_type, 'merged')
+                )
+                """
+            )
+
     def _ensure_schema_migrations(self):
         """Add newly introduced columns to existing databases."""
         cursor = self.conn.execute("PRAGMA table_info(conversations)")
@@ -185,6 +274,37 @@ class Database:
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_preference_lineage_parent_memory_id ON preference_lineage(parent_memory_id)")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_preference_usage_memory_id ON preference_usage(memory_id)")
         self.conn.execute("CREATE INDEX IF NOT EXISTS idx_preference_usage_client_id ON preference_usage(client_id)")
+
+        self._deduplicate_preference_tables()
+
+        # Drop old over-strict index if it exists, then create the correct one
+        self.conn.execute("DROP INDEX IF EXISTS idx_preferences_exact_dedup")
+        self.conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_preferences_exact_dedup
+            ON preferences (
+                COALESCE(category, ''),
+                COALESCE(key, ''),
+                COALESCE(value, '')
+            )
+            """
+        )
+        self.conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_preference_sources_memory_conversation
+            ON preference_sources (memory_id, conversation_id)
+            """
+        )
+        self.conn.execute(
+            """
+            CREATE UNIQUE INDEX IF NOT EXISTS idx_preference_lineage_unique
+            ON preference_lineage (
+                child_memory_id,
+                parent_memory_id,
+                COALESCE(relation_type, 'merged')
+            )
+            """
+        )
 
         self.conn.commit()
 
@@ -262,10 +382,10 @@ class Database:
             cursor = self.conn.execute(
                 """
                 SELECT id FROM conversations
-                WHERE platform = ? AND timestamp = ? AND content_hash = ?
+                WHERE platform = ? AND content_hash = ?
                 LIMIT 1
                 """,
-                (platform, timestamp, content_hash),
+                (platform, content_hash),
             )
             row = cursor.fetchone()
             if row:
@@ -410,9 +530,11 @@ class Database:
         return result
 
     def delete_conversation(self, conversation_id: str) -> bool:
-        cursor = self.conn.execute("DELETE FROM topics WHERE conversation_id = ?", (conversation_id,))
-        cursor = self.conn.execute("DELETE FROM decisions WHERE conversation_id = ?", (conversation_id,))
-        cursor = self.conn.execute(
+        self.conn.execute("DELETE FROM preference_sources WHERE conversation_id = ?", (conversation_id,))
+        self.conn.execute("DELETE FROM preference_usage WHERE conversation_id = ?", (conversation_id,))
+        self.conn.execute("DELETE FROM topics WHERE conversation_id = ?", (conversation_id,))
+        self.conn.execute("DELETE FROM decisions WHERE conversation_id = ?", (conversation_id,))
+        self.conn.execute(
             "DELETE FROM conversation_relations WHERE from_conversation_id = ? OR to_conversation_id = ?",
             (conversation_id, conversation_id),
         )

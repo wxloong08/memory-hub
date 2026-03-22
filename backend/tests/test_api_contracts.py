@@ -1,6 +1,7 @@
 from pathlib import Path
 import sys
 import tempfile
+import uuid
 
 from fastapi.testclient import TestClient
 
@@ -154,13 +155,44 @@ def test_memories_endpoint_contract():
     assert delete_response.json()["deleted"] is True
 
 
+def test_create_memory_deduplicates_exact_payload():
+    unique_suffix = uuid.uuid4().hex[:10]
+    payload = {
+        "category": "workflow",
+        "key": f"dedupe_create_{unique_suffix}",
+        "value": f"我喜欢先给结论再给细节。{unique_suffix}",
+        "confidence": 0.87,
+    }
+
+    first = client.post("/api/memories", json=payload)
+    second = client.post("/api/memories", json=payload)
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert first.json()["memory_id"] == second.json()["memory_id"]
+
+    list_response = client.get("/api/memories")
+    assert list_response.status_code == 200
+    matches = [
+        memory for memory in list_response.json()["memories"]
+        if memory.get("category") == payload["category"]
+        and memory.get("key") == payload["key"]
+        and memory.get("value") == payload["value"]
+        and float(memory.get("confidence") or 0.0) == payload["confidence"]
+        and int(memory.get("priority") or 0) == 0
+        and memory.get("status") == "active"
+        and memory.get("client_rules") == {}
+    ]
+    assert len(matches) == 1
+
+
 def test_update_memory_endpoint_contract():
+    unique_suffix = uuid.uuid4().hex[:10]
     create_response = client.post(
         "/api/memories",
         json={
             "category": "general",
-            "key": "editing_test",
-            "value": "原始记忆内容",
+            "key": f"editing_test_{unique_suffix}",
+            "value": f"原始记忆内容_{unique_suffix}",
             "confidence": 0.6,
         },
     )
@@ -171,8 +203,8 @@ def test_update_memory_endpoint_contract():
         f"/api/memories/{memory_id}",
         json={
             "category": "workflow",
-            "key": "editing_test_updated",
-            "value": "更新后的记忆内容",
+            "key": f"editing_test_updated_{unique_suffix}",
+            "value": f"更新后的记忆内容_{unique_suffix}",
             "confidence": 0.9,
         },
     )
@@ -186,8 +218,8 @@ def test_update_memory_endpoint_contract():
     assert list_response.status_code == 200
     updated = next(item for item in list_response.json()["memories"] if item["id"] == memory_id)
     assert updated["category"] == "workflow"
-    assert updated["key"] == "editing_test_updated"
-    assert updated["value"] == "更新后的记忆内容"
+    assert updated["key"] == f"editing_test_updated_{unique_suffix}"
+    assert updated["value"] == f"更新后的记忆内容_{unique_suffix}"
     assert float(updated["confidence"]) == 0.9
 
 
@@ -526,6 +558,41 @@ def test_extract_memory_keeps_conversation_source_contract():
     assert any(float(item.get("effective_confidence") or 0) >= float(item.get("confidence") or 0) for item in sourced)
 
 
+def test_extract_memory_deduplicates_repeated_runs():
+    unique_suffix = uuid.uuid4().hex[:10]
+    statement = f"我喜欢先给结论再看细节 unique_{unique_suffix}"
+    payload = {
+        "platform": "codex",
+        "timestamp": "2026-03-16T09:10:00",
+        "project": "memory extract dedupe test",
+        "provider": "openai",
+        "model": "gpt-5-codex",
+        "assistant_label": "Codex",
+        "summary": "memory extract dedupe test",
+        "messages": [
+            {"role": "user", "content": f"{statement}。"},
+            {"role": "assistant", "content": "收到。"},
+        ],
+    }
+    create_response = client.post("/api/conversations", json=payload)
+    assert create_response.status_code == 200
+    conversation_id = create_response.json()["conversation_id"]
+
+    first_extract = client.post(f"/api/memories/extract/{conversation_id}")
+    second_extract = client.post(f"/api/memories/extract/{conversation_id}")
+    assert first_extract.status_code == 200
+    assert second_extract.status_code == 200
+    assert second_extract.json()["inserted_count"] == 0
+
+    conversation_memories = client.get(f"/api/conversations/{conversation_id}/memories")
+    assert conversation_memories.status_code == 200
+    matches = [
+        memory for memory in conversation_memories.json()["memories"]
+        if memory.get("value") == statement
+    ]
+    assert len(matches) == 1
+
+
 def test_conversation_memories_endpoint_contract():
     payload = {
         "platform": "codex",
@@ -827,13 +894,15 @@ def test_conversation_export_preview_and_apply():
     assert "Pinned Memory" in preview_body["content"]
     assert "answer_style" in preview_body["content"]
 
+    # Use a memory_id from the preview's selected_memories
+    first_selected_memory_id = preview_body["selected_memories"][0]["id"]
     explicit_preview_response = client.get(
         f"/api/conversations/{conversation_id}/export",
-        params={"client": "codex", "selected_memory_ids": str(memory_id)},
+        params={"client": "codex", "selected_memory_ids": str(first_selected_memory_id)},
     )
     assert explicit_preview_response.status_code == 200
     explicit_preview_body = explicit_preview_response.json()
-    assert explicit_preview_body["selected_memory_ids"] == [memory_id]
+    assert explicit_preview_body["selected_memory_ids"] == [first_selected_memory_id]
     assert explicit_preview_body["memory_count"] == 1
 
     forced_memory = client.post(
@@ -864,7 +933,7 @@ def test_conversation_export_preview_and_apply():
     with tempfile.TemporaryDirectory() as temp_dir:
         apply_response = client.post(
             f"/api/conversations/{conversation_id}/export/apply",
-            json={"client": "codex", "workspace_path": temp_dir, "selected_memory_ids": [memory_id]},
+            json={"client": "codex", "workspace_path": temp_dir, "selected_memory_ids": [first_selected_memory_id]},
         )
         assert apply_response.status_code == 200
         apply_body = apply_response.json()
@@ -876,7 +945,7 @@ def test_conversation_export_preview_and_apply():
 
     memories_after_apply = client.get("/api/memories")
     assert memories_after_apply.status_code == 200
-    applied_memory = next(item for item in memories_after_apply.json()["memories"] if item["id"] == memory_id)
+    applied_memory = next(item for item in memories_after_apply.json()["memories"] if item["id"] == first_selected_memory_id)
     assert applied_memory["usage_count"] >= 1
     assert any(client_usage["client_id"] == "codex" for client_usage in applied_memory["client_usage"])
 

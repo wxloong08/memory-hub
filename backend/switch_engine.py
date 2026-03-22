@@ -183,6 +183,52 @@ def update_core_memory_access(conn: sqlite3.Connection, memory_ids: list[int]) -
 # Archive retrieval
 # ---------------------------------------------------------------------------
 
+def _get_sessions_by_ids(
+    conn: sqlite3.Connection,
+    conversation_ids: list[str],
+) -> list[dict]:
+    """Get archive sessions by specific conversation IDs."""
+    if not conversation_ids:
+        return []
+    conn.row_factory = sqlite3.Row
+    placeholders = ",".join("?" for _ in conversation_ids)
+    try:
+        cursor = conn.execute(
+            f"SELECT id, platform, started_at, ended_at, summary, provider, model, message_count "
+            f"FROM archive_conversations WHERE id IN ({placeholders}) ORDER BY started_at DESC",
+            conversation_ids,
+        )
+        sessions = [dict(row) for row in cursor.fetchall()]
+    except sqlite3.OperationalError:
+        cursor = conn.execute(
+            f"SELECT id, platform, timestamp as started_at, summary, provider, model "
+            f"FROM conversations WHERE id IN ({placeholders}) ORDER BY started_at DESC",
+            conversation_ids,
+        )
+        sessions = [dict(row) for row in cursor.fetchall()]
+        for s in sessions:
+            s["messages"] = []
+        return sessions
+
+    for session in sessions:
+        msg_cursor = conn.execute(
+            "SELECT ordinal, role, content, content_type, compressed, token_estimate, metadata "
+            "FROM archive_messages WHERE conversation_id = ? ORDER BY ordinal",
+            (session["id"],),
+        )
+        messages = []
+        for msg_row in msg_cursor.fetchall():
+            msg = dict(msg_row)
+            if isinstance(msg.get("metadata"), str):
+                try:
+                    msg["metadata"] = json.loads(msg["metadata"])
+                except (json.JSONDecodeError, TypeError):
+                    msg["metadata"] = {}
+            messages.append(msg)
+        session["messages"] = messages
+    return sessions
+
+
 def get_recent_archive_sessions(
     conn: sqlite3.Connection,
     workspace_path: str | None = None,
@@ -371,6 +417,8 @@ def execute_switch(
     from_session_id: str | None = None,
     token_budget: int | None = None,
     include_archive_turns: int | None = None,
+    conversation_ids: list[str] | None = None,
+    custom_context: str | None = None,
     write_file: bool = True,
 ) -> dict:
     """Execute a full CLI switch.
@@ -415,8 +463,11 @@ def execute_switch(
             merged_core.append(mem)
             seen_ids.add(mem_id)
 
-    # 3. Archive sessions
-    archive_sessions = get_recent_archive_sessions(conn, workspace_path=workspace_path, limit=5)
+    # 3. Archive sessions (use selected conversations if provided)
+    if conversation_ids:
+        archive_sessions = _get_sessions_by_ids(conn, conversation_ids)
+    else:
+        archive_sessions = get_recent_archive_sessions(conn, workspace_path=workspace_path, limit=5)
 
     # 4. Assemble context
     switch_count = working.get("switch_count", 0) if working else 0
@@ -430,6 +481,14 @@ def execute_switch(
         from_cli=from_cli or (working.get("last_cli") if working else None),
         switch_count=switch_count,
     )
+
+    # 4b. Inject custom context if provided
+    if custom_context and custom_context.strip():
+        custom_section = f"\n## Custom Notes\n\n{custom_context.strip()}\n"
+        result["content"] = result["content"].replace(
+            "\n---\n_Context assembled by Memory Hub V2_\n",
+            custom_section + "\n---\n_Context assembled by Memory Hub V2_\n",
+        )
 
     # 5. Write to target file
     target_path = None
@@ -489,6 +548,8 @@ def preview_switch(
     workspace_path: str,
     token_budget: int | None = None,
     include_archive_turns: int | None = None,
+    conversation_ids: list[str] | None = None,
+    custom_context: str | None = None,
 ) -> dict:
     """Preview what would be injected without writing files or recording the switch."""
     working = get_working_memory(conn, workspace_path)
@@ -503,7 +564,10 @@ def preview_switch(
             merged_core.append(mem)
             seen_ids.add(mem_id)
 
-    archive_sessions = get_recent_archive_sessions(conn, workspace_path=workspace_path, limit=5)
+    if conversation_ids:
+        archive_sessions = _get_sessions_by_ids(conn, conversation_ids)
+    else:
+        archive_sessions = get_recent_archive_sessions(conn, workspace_path=workspace_path, limit=5)
     switch_count = working.get("switch_count", 0) if working else 0
 
     result = assemble_switch_context(
@@ -516,6 +580,14 @@ def preview_switch(
         from_cli=working.get("last_cli") if working else None,
         switch_count=switch_count,
     )
+    # Inject custom context if provided
+    if custom_context and custom_context.strip():
+        custom_section = f"\n## Custom Notes\n\n{custom_context.strip()}\n"
+        result["content"] = result["content"].replace(
+            "\n---\n_Context assembled by Memory Hub V2_\n",
+            custom_section + "\n---\n_Context assembled by Memory Hub V2_\n",
+        )
+
     result["status"] = "preview"
     result["content_preview"] = result["content"]
     return result

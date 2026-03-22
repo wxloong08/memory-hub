@@ -286,6 +286,7 @@ const hasMoreFromApi = ref(false)
 let loadMoreObserver = null
 let filterReloadTimer = null
 let suppressQuerySync = false
+let suppressRouteReload = false
 const { t, formatDateTime } = useI18n()
 
 const summaryModeLabel = computed(() => (
@@ -447,7 +448,9 @@ async function syncQueryState() {
     q: quickFilter.value.trim() || undefined,
   }
 
+  suppressRouteReload = true
   await router.replace({ path: route.path, query: nextQuery })
+  suppressRouteReload = false
 }
 
 function looksUnreadable(conv) {
@@ -668,6 +671,7 @@ watch([renderedConversations, filteredConversations, loadMoreSentinel, hasMoreFr
 })
 
 watch(() => route.query, (query) => {
+  if (suppressRouteReload) return
   applyQueryState(query)
   if (filterReloadTimer) {
     window.clearTimeout(filterReloadTimer)

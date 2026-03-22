@@ -69,7 +69,7 @@
               <span class="text-xs text-stone-400">{{ formatTime(r.timestamp) }}</span>
             </div>
             <span v-if="r.similarity != null" class="memory-badge bg-teal-50 text-teal-800">
-              {{ (r.similarity * 100).toFixed(0) }}% match
+              {{ t('similarityMatch', { percent: (r.similarity * 100).toFixed(0) }) }}
             </span>
           </div>
           <p class="mt-3 text-sm leading-6 text-stone-700">{{ r.summary || t('noSummaryYet') }}</p>
@@ -109,7 +109,7 @@ async function doSearch() {
     results.value = result.results || result || []
     memoryResults.value = result.memory_results || []
   } catch (e) {
-    error.value = `Search failed: ${e.message}`
+    error.value = t('searchFailed', { message: e.message })
     results.value = []
     memoryResults.value = []
   } finally {

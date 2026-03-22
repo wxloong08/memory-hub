@@ -168,5 +168,23 @@ export default {
   async validateBackupSource(sourcePath) {
     const { data } = await client.get('/backup/validate', { params: { source_path: sourcePath } })
     return data
-  }
+  },
+  async switchPreview(params) {
+    const { data } = await client.post('/v2/switch/preview', {
+      to_cli: params.to_cli,
+      workspace_path: params.workspace_path,
+      token_budget: params.token_budget,
+      conversation_ids: params.conversation_ids,
+      custom_context: params.custom_context,
+    })
+    return data
+  },
+  async executeSwitch(params) {
+    const { data } = await client.post('/v2/switch/execute', params)
+    return data
+  },
+  async switchHistory() {
+    const { data } = await client.get('/v2/switch/history')
+    return data
+  },
 }
