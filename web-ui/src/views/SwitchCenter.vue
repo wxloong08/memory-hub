@@ -249,12 +249,12 @@ const cliOptions = [
   { value: 'antigravity', label: 'Antigravity', emoji: '\uD83E\uDE90' },
 ]
 
-// Token budgets by CLI (approximate defaults)
+// Token budgets by CLI (must match backend context_assembler.py)
 const CLI_TOKEN_BUDGETS = {
-  claude_code: 8000,
-  codex: 6000,
-  gemini_cli: 8000,
-  antigravity: 6000,
+  claude_code: 28000,
+  codex: 16000,
+  gemini_cli: 111000,
+  antigravity: 16000,
 }
 
 // ── State: Left panel ──

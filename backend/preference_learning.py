@@ -72,7 +72,9 @@ class PreferenceLearning:
         ]
 
         for conv in conversations:
-            content = conv['full_content']
+            content = conv.get('full_content', '') or ''
+            if not content:
+                continue
 
             for pattern, pref_type in preference_patterns:
                 matches = re.finditer(pattern, content, re.IGNORECASE)

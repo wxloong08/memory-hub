@@ -576,7 +576,6 @@ import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import api from '../api/memory-hub.js'
 import { platformEmoji, platformClass } from '../constants/platforms.js'
-import DOMPurify from 'dompurify'
 import { useI18n } from '../composables/useI18n.js'
 
 const route = useRoute()
@@ -932,8 +931,12 @@ async function copyExportPreview() {
     exportError.value = t('previewEmpty')
     return
   }
-  await navigator.clipboard.writeText(exportPreview.value.content)
-  exportMessage.value = t('previewReady')
+  try {
+    await navigator.clipboard.writeText(exportPreview.value.content)
+    exportMessage.value = t('previewReady')
+  } catch {
+    exportError.value = t('copyFailed')
+  }
 }
 
 async function loadExportClients() {

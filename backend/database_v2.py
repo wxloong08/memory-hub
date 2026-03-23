@@ -276,8 +276,8 @@ class DatabaseV2:
 
             if content_hash:
                 cursor = self.conn.execute(
-                    "SELECT id FROM archive_conversations WHERE content_hash = ? LIMIT 1",
-                    (content_hash,),
+                    "SELECT id FROM archive_conversations WHERE platform = ? AND content_hash = ? LIMIT 1",
+                    (platform, content_hash),
                 )
                 row = cursor.fetchone()
                 if row:

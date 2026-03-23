@@ -85,7 +85,7 @@ export default {
     return data
   },
   async extractMemoriesFromConversation(conversationId) {
-    const { data } = await client.post(`/memories/extract/${conversationId}`)
+    const { data } = await client.post(`/memories/extract/${conversationId}`, null, { timeout: 60000 })
     return data
   },
   async getConversationMemories(conversationId) {
@@ -109,7 +109,7 @@ export default {
     return data
   },
   async analyzeConversation(conversationId) {
-    const { data } = await client.post(`/analyze/${conversationId}`)
+    const { data } = await client.post(`/analyze/${conversationId}`, null, { timeout: 60000 })
     return data
   },
   async resummarizeConversations(payload) {
@@ -176,11 +176,11 @@ export default {
       token_budget: params.token_budget,
       conversation_ids: params.conversation_ids,
       custom_context: params.custom_context,
-    })
+    }, { timeout: 60000 })
     return data
   },
   async executeSwitch(params) {
-    const { data } = await client.post('/v2/switch/execute', params)
+    const { data } = await client.post('/v2/switch', params, { timeout: 60000 })
     return data
   },
   async switchHistory() {

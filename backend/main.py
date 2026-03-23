@@ -1,10 +1,13 @@
 import asyncio
+import logging
 from datetime import datetime
 from pathlib import Path
 import json
 import re
 from typing import Dict, List, Optional
 from hashlib import sha256
+
+logger = logging.getLogger(__name__)
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -179,7 +182,7 @@ async def _backup_scheduler_loop():
         try:
             run_scheduled_backup_if_due(db.conn, DATA_DIR)
         except Exception as e:
-            print(f"[backup_scheduler] Error: {e}")
+            logger.warning("[backup_scheduler] Error: %s", e)
         await asyncio.sleep(300)
 
 class ConversationInput(BaseModel):
@@ -458,6 +461,10 @@ def _get_conversation_record(conversation_id: str) -> dict:
         (conversation_id,),
     )
     row = cursor.fetchone()
+    if not row and db_v2:
+        v2_row = db_v2.get_conversation(conversation_id)
+        if v2_row:
+            return v2_row
     if not row:
         raise HTTPException(status_code=404, detail="Conversation not found")
     return dict(row)
@@ -1111,6 +1118,8 @@ async def get_context(
     min_importance: int = 7
 ):
     """Get context summary for recent conversations"""
+    hours = max(1, min(hours, 8760))
+    min_importance = max(0, min(min_importance, 10))
 
     conversations = db.get_recent_conversations(
         hours=hours,
@@ -1165,7 +1174,7 @@ async def get_context(
             if ai_context:
                 context = f"# AI-Synthesized Context\n\n{ai_context}\n\n---\n\n{context}"
         except Exception as e:
-            print(f"[ai_context] Generation failed: {e}")
+            logger.warning("[ai_context] Generation failed: %s", e)
 
     return {"context": context}
 
@@ -1177,6 +1186,10 @@ async def health_check():
 @app.get("/api/search")
 async def search_conversations(query: str, limit: int = 5):
     """Semantic search for conversations - returns frontend-friendly format"""
+    if not query or not query.strip():
+        return {"query": query, "results": [], "memory_results": [], "count": 0, "memory_count": 0}
+    query = query[:500]
+    limit = max(1, min(limit, 50))
     raw_results = vector_store.search(query, top_k=limit)
     conversation_map = _load_conversation_map([item.get("id", "") for item in raw_results])
     results = [_transform_vector_result(item, conversation_map) for item in raw_results]
@@ -2091,7 +2104,9 @@ async def update_backup_settings(payload: BackupSettingsInput):
 
 @app.post("/api/backup/restore")
 async def restore_backup(payload: BackupRestoreInput):
-    source_path = Path(payload.source_path)
+    source_path = Path(payload.source_path).resolve()
+    if not source_path.is_relative_to(DATA_DIR.resolve().parent):
+        raise HTTPException(status_code=403, detail="Backup source must be within the project directory")
     if not source_path.exists():
         raise HTTPException(status_code=404, detail="Backup source not found")
 
@@ -2111,7 +2126,9 @@ async def restore_backup(payload: BackupRestoreInput):
 
 @app.get("/api/backup/preview")
 async def preview_backup(source_path: str):
-    source = Path(source_path)
+    source = Path(source_path).resolve()
+    if not source.is_relative_to(DATA_DIR.resolve().parent):
+        raise HTTPException(status_code=403, detail="Backup source must be within the project directory")
     if not source.exists():
         raise HTTPException(status_code=404, detail="Backup source not found")
 
@@ -2123,7 +2140,9 @@ async def preview_backup(source_path: str):
 
 @app.get("/api/backup/validate")
 async def validate_backup(source_path: str):
-    source = Path(source_path)
+    source = Path(source_path).resolve()
+    if not source.is_relative_to(DATA_DIR.resolve().parent):
+        raise HTTPException(status_code=403, detail="Backup source must be within the project directory")
     if not source.exists():
         raise HTTPException(status_code=404, detail="Backup source not found")
 

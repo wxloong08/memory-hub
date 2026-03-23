@@ -143,6 +143,7 @@ const navItems = computed(() => ([
   { path: '/', icon: 'OV', label: t('navOverview') },
   { path: '/conversations', icon: 'TH', label: t('navThreads') },
   { path: '/search', icon: 'SR', label: t('navSearch') },
+  { path: '/switch', icon: 'SW', label: t('navSwitch') },
   { path: '/settings', icon: 'CF', label: t('navSettings') },
 ]))
 

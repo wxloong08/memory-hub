@@ -1,4 +1,5 @@
 import sqlite3
+import threading
 from typing import List, Optional
 import uuid
 from datetime import datetime
@@ -23,6 +24,7 @@ LIST_SORT_SQL = {
 class Database:
     def __init__(self, db_path: str = "data/memory.db"):
         self.db_path = db_path
+        self._lock = threading.RLock()
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")

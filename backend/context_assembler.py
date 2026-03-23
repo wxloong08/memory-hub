@@ -54,7 +54,7 @@ def get_budget(cli: str, override: int | None = None) -> dict[str, int]:
     budget = CLI_TOKEN_BUDGETS.get(cli, CLI_TOKEN_BUDGETS["codex"]).copy()
     if override and override > 0:
         ratio = override / budget["total"]
-        budget = {k: max(500, int(v * ratio)) for k, v in budget.items()}
+        budget = {k: int(v * ratio) for k, v in budget.items()}
         budget["total"] = override
     return budget
 

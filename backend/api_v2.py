@@ -173,7 +173,7 @@ async def ingest_conversation(payload: ConversationV2Input):
         messages_dicts=messages_dicts,
         platform=payload.platform,
         started_at=payload.started_at,
-        project=payload.metadata.get("project", "") if payload.metadata else "",
+        project=payload.project or (payload.metadata.get("project", "") if payload.metadata else ""),
         provider=payload.provider or "",
         model=payload.model or "",
         assistant_label=payload.assistant_label or "",

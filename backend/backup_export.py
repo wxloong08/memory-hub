@@ -284,6 +284,7 @@ def restore_backup_source(data_dir: Path, source_path: Path) -> dict:
                         raise ValueError(f"Zip Slip path traversal detected: {member}")
                 archive.extractall(extract_dir)
             result = restore_backup_bundle(data_dir, extract_dir)
+            result["restored_from"] = str(source_path)
             result["restored_from_zip"] = str(source_path)
             result["source_type"] = "zip"
             return result

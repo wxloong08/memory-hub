@@ -206,7 +206,7 @@ def start_file_watcher(
 
     Returns True if successfully started, False if watchdog is not available.
     """
-    global _watcher_active
+    global _watcher_active, _observer
 
     try:
         from watchdog.observers import Observer
