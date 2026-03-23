@@ -11,11 +11,13 @@ export default {
   },
   async getStats() {
     const { data } = await client.get('/stats')
+    if (!data || typeof data !== 'object') throw new Error('Invalid stats response')
     return data
   },
   async listConversations(params = {}) {
     const mergedParams = { limit: 50, offset: 0, ...params }
     const { data } = await client.get('/conversations/list', { params: mergedParams })
+    if (!data || typeof data !== 'object') throw new Error('Invalid conversations response')
     return data
   },
   async getConversationFilters() {
@@ -23,7 +25,9 @@ export default {
     return data
   },
   async getConversation(id) {
+    if (!id) throw new Error('Conversation ID is required')
     const { data } = await client.get(`/conversations/${id}`)
+    if (!data || typeof data !== 'object') throw new Error('Invalid conversation response')
     return data
   },
   async deleteConversation(id) {

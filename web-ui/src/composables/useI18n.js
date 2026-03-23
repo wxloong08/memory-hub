@@ -476,6 +476,12 @@ const messages = {
     restoreCompleted: '恢复完成',
     restoreFailedMessage: '恢复失败: {message}',
     noRestoreResult: '还没有恢复结果。',
+    switchTokenCount: 'Token 数量：{tokens} / 预算 {budget}',
+    switchPreviewFailed: '预览失败: {message}',
+    switchExecuteFailed: '执行失败: {message}',
+    analyzeConversationFailed: '分析对话失败: {message}',
+    failedToLoadConversation: '加载对话失败: {message}',
+    failedToLoadConversations: '加载会话列表失败: {message}',
   },
   en: {
     appName: 'Claude Memory',
@@ -949,6 +955,12 @@ const messages = {
     restoreCompleted: 'Restore completed',
     restoreFailedMessage: 'Restore failed: {message}',
     noRestoreResult: 'No restore result yet.',
+    switchTokenCount: 'Token count: {tokens} / budget {budget}',
+    switchPreviewFailed: 'Preview failed: {message}',
+    switchExecuteFailed: 'Execute failed: {message}',
+    analyzeConversationFailed: 'Failed to analyze conversation: {message}',
+    failedToLoadConversation: 'Failed to load conversation: {message}',
+    failedToLoadConversations: 'Failed to load conversations: {message}',
   },
 }
 

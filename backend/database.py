@@ -28,6 +28,7 @@ class Database:
         self.conn = sqlite3.connect(db_path, check_same_thread=False)
         self.conn.row_factory = sqlite3.Row
         self.conn.execute("PRAGMA foreign_keys = ON")
+        self.conn.execute("PRAGMA busy_timeout = 5000")
         self._create_schema()
         self._ensure_schema_migrations()
 

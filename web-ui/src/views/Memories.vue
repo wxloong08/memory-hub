@@ -6,6 +6,8 @@
       <p class="mt-3 max-w-2xl text-sm leading-7 text-stone-600">{{ t('memoryCenterDescription') }}</p>
     </div>
 
+    <div v-if="loading" class="memory-panel rounded-[28px] p-8 text-sm text-stone-500">{{ t('loading') }}</div>
+
     <div class="flex gap-2 overflow-x-auto">
       <button v-for="tab in tabs" :key="tab.key" @click="activeTab = tab.key"
         :class="['rounded-full px-4 py-2 text-sm font-medium transition-colors',
@@ -817,6 +819,7 @@ const tabs = computed(() => [
 ])
 
 const connected = ref(false)
+const loading = ref(false)
 const memories = ref([])
 const memorySuggestions = ref([])
 const memoryConflicts = ref([])
@@ -1065,6 +1068,7 @@ const groupedMemorySections = computed(() => {
 })
 
 async function checkConnection() {
+  loading.value = true
   try {
     connected.value = await api.checkHealth()
     if (connected.value) {
@@ -1078,6 +1082,8 @@ async function checkConnection() {
     }
   } catch (_) {
     connected.value = false
+  } finally {
+    loading.value = false
   }
 }
 

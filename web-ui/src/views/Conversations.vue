@@ -558,7 +558,7 @@ async function fetchConversationPage({ reset = false } = {}) {
     totalAvailable.value = Number(result.total ?? conversations.value.length)
     hasMoreFromApi.value = Boolean(result.has_more)
   } catch (e) {
-    error.value = `Failed to load conversations: ${e.message}`
+    error.value = t('failedToLoadConversations', { message: e.message })
   } finally {
     loading.value = false
     loadingMoreFromApi.value = false

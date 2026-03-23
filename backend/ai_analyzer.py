@@ -4,11 +4,14 @@ Supports multiple AI providers with fallback to regex-based extraction.
 """
 
 import json
+import logging
 import os
 import re
 from pathlib import Path
 
 from ai_providers import create_provider, PROVIDER_DEFAULTS
+
+logger = logging.getLogger(__name__)
 
 
 class AIAnalyzer:
@@ -37,7 +40,7 @@ class AIAnalyzer:
                     config["base_url"] = env_base_url
                 self.provider = create_provider(provider_name, config)
                 if self.provider:
-                    print(f"AI Analyzer: using provider '{provider_name}' from environment")
+                    logger.info("AI Analyzer: using provider '%s' from environment", provider_name)
                     return
 
         # Check for custom provider via env
@@ -50,7 +53,7 @@ class AIAnalyzer:
             }
             self.provider = create_provider("custom", config)
             if self.provider:
-                print("AI Analyzer: using custom provider from environment")
+                logger.info("AI Analyzer: using custom provider from environment")
                 return
 
         # Fall back to config file
@@ -59,7 +62,7 @@ class AIAnalyzer:
             with open(config_path, "r", encoding="utf-8") as f:
                 file_config = json.load(f)
         except (FileNotFoundError, json.JSONDecodeError, OSError):
-            print("AI Analyzer: no config file found, running in fallback mode")
+            logger.info("AI Analyzer: no config file found, running in fallback mode")
             return
 
         default_provider = file_config.get("default_provider", "")
@@ -71,7 +74,7 @@ class AIAnalyzer:
             if provider_conf.get("api_key"):
                 self.provider = create_provider(default_provider, provider_conf)
                 if self.provider:
-                    print(f"AI Analyzer: using provider '{default_provider}' from config file")
+                    logger.info("AI Analyzer: using provider '%s' from config file", default_provider)
                     return
 
         # Otherwise try each provider that has an API key
@@ -79,10 +82,10 @@ class AIAnalyzer:
             if provider_conf.get("api_key"):
                 self.provider = create_provider(name, provider_conf)
                 if self.provider:
-                    print(f"AI Analyzer: using provider '{name}' from config file")
+                    logger.info("AI Analyzer: using provider '%s' from config file", name)
                     return
 
-        print("AI Analyzer: no configured provider found, running in fallback mode")
+        logger.info("AI Analyzer: no configured provider found, running in fallback mode")
 
     def is_ai_available(self) -> bool:
         """Check if an AI provider is configured and available."""
@@ -244,7 +247,7 @@ class AIAnalyzer:
             # If JSON parsing failed, wrap the raw response
             return {"summary": response[:500], "ai_generated": True, "topics": [], "key_points": []}
         except Exception as e:
-            print(f"AI analysis failed: {e}")
+            logger.error("AI analysis failed: %s", e)
             return self._fallback_summary(content)
 
     async def generate_context_injection(self, conversations: list[dict], pinned_memories: list[dict] | None = None) -> str:
@@ -273,7 +276,7 @@ class AIAnalyzer:
             response = await self.provider.chat(messages)
             return response.strip()
         except Exception as e:
-            print(f"AI context injection failed: {e}")
+            logger.error("AI context injection failed: %s", e)
             return self._fallback_context_injection(conversations, pinned_memories)
 
     async def extract_key_info(self, content: str) -> dict:
@@ -306,7 +309,7 @@ class AIAnalyzer:
                 return result
             return {"summary": response[:500], "ai_generated": True}
         except Exception as e:
-            print(f"AI key info extraction failed: {e}")
+            logger.error("AI key info extraction failed: %s", e)
             return self._fallback_key_info(content)
 
 

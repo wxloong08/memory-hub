@@ -1,5 +1,6 @@
 import asyncio
 import logging
+import threading
 from datetime import datetime
 from pathlib import Path
 import json
@@ -8,6 +9,8 @@ from typing import Dict, List, Optional
 from hashlib import sha256
 
 logger = logging.getLogger(__name__)
+
+_db_lock = threading.RLock()
 
 from fastapi import FastAPI, HTTPException
 from fastapi.middleware.cors import CORSMiddleware
@@ -47,10 +50,12 @@ app.add_middleware(
         "http://127.0.0.1:5173",
         "http://127.0.0.1:8765",
     ],
+    # To whitelist specific extension IDs, use:
+    # allow_origin_regex=r"^chrome-extension://(extid1|extid2)$",
     allow_origin_regex=r"^chrome-extension://.*$",
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allow_headers=["Content-Type", "Authorization", "X-Requested-With"],
 )
 
 BASE_DIR = Path(__file__).resolve().parent
@@ -86,46 +91,55 @@ def _sync_existing_conversations_to_vector_store():
         )
         v2_rows = [dict(row) for row in v2_cursor.fetchall()]
         if v2_rows:
-            # Reconstruct full_content from archive_messages for each V2 conversation
+            # Batch fetch all messages for V2 conversations in one query
+            conv_ids = [row["id"] for row in v2_rows]
+            placeholders = ",".join("?" for _ in conv_ids)
+            all_msgs_cursor = db.conn.execute(
+                f"SELECT conversation_id, role, content FROM archive_messages WHERE conversation_id IN ({placeholders}) ORDER BY conversation_id, ordinal",
+                conv_ids,
+            )
+            messages_by_conv: dict[str, list[dict]] = {}
+            for msg_row in all_msgs_cursor.fetchall():
+                msg_dict = dict(msg_row)
+                messages_by_conv.setdefault(msg_dict["conversation_id"], []).append(msg_dict)
+
             for row in v2_rows:
-                msg_cursor = db.conn.execute(
-                    "SELECT role, content FROM archive_messages WHERE conversation_id = ? ORDER BY ordinal",
-                    (row["id"],),
-                )
+                msgs = messages_by_conv.get(row["id"], [])
                 row["full_content"] = "\n\n".join(
-                    f"{m['role']}: {m['content']}" for m in [dict(r) for r in msg_cursor.fetchall()]
+                    f"{m['role']}: {m['content']}" for m in msgs
                 )
             vector_store.sync_from_records(v2_rows)
-    except Exception:
+    except Exception as e:
         # Table may not exist yet on first startup
-        pass
+        logger.warning("V2 sync to vector store skipped: %s", e)
 
 
 def _reload_runtime_state():
     global db, vector_store, db_v2
-    try:
-        db.conn.close()
-    except Exception:
-        pass
-
-    db = Database(str(DATA_DIR / "memory.db"))
-    vector_store = VectorStore(str(DATA_DIR / "vectors"))
-    vector_store.reset()
-    _sync_existing_conversations_to_vector_store()
-
-    # Rebuild V2 database connection so V2 endpoints use the restored data
-    try:
-        old_v2 = db_v2
+    with _db_lock:
         try:
-            old_v2.conn.close()
-        except Exception:
-            pass
-        db_v2 = DatabaseV2(str(DATA_DIR / "memory.db"))
-        from api_v2 import set_db_v2, set_vector_store_v2
-        set_db_v2(db_v2)
-        set_vector_store_v2(vector_store)
-    except Exception:
-        pass
+            db.conn.close()
+        except Exception as e:
+            logger.warning("Error closing db connection: %s", e)
+
+        db = Database(str(DATA_DIR / "memory.db"))
+        vector_store = VectorStore(str(DATA_DIR / "vectors"))
+        vector_store.reset()
+        _sync_existing_conversations_to_vector_store()
+
+        # Rebuild V2 database connection so V2 endpoints use the restored data
+        try:
+            old_v2 = db_v2
+            try:
+                old_v2.conn.close()
+            except Exception as e:
+                logger.warning("Error closing V2 db connection: %s", e)
+            db_v2 = DatabaseV2(str(DATA_DIR / "memory.db"))
+            from api_v2 import set_db_v2, set_vector_store_v2
+            set_db_v2(db_v2)
+            set_vector_store_v2(vector_store)
+        except Exception as e:
+            logger.warning("Error rebuilding V2 database: %s", e)
 
 
 _sync_existing_conversations_to_vector_store()
@@ -1181,7 +1195,12 @@ async def get_context(
 @app.get("/health")
 async def health_check():
     """Health check endpoint"""
-    return {"status": "healthy"}
+    try:
+        db.conn.execute("SELECT 1").fetchone()
+        db_ok = True
+    except Exception:
+        db_ok = False
+    return {"status": "healthy" if db_ok else "degraded", "database": "ok" if db_ok else "error"}
 
 @app.get("/api/search")
 async def search_conversations(query: str, limit: int = 5):
@@ -1618,69 +1637,102 @@ async def merge_memories(payload: MemoryMergeInput):
         elif merged_rules.get(client_id) != "include":
             merged_rules[client_id] = rule
 
-    merged_memory_id, _ = _upsert_preference_exact(
-        category=category,
-        key=key,
-        value=merged_value[:1000],
-        confidence=merged_confidence,
-        priority=merged_priority,
-        client_rules_json=_serialize_client_rules(merged_rules),
-        status="active",
-    )
-    source_rows = db.conn.execute(
-        """
-        SELECT DISTINCT conversation_id
-        FROM preference_sources
-        WHERE memory_id IN (?, ?)
-        """,
-        (payload.left_id, payload.right_id),
-    ).fetchall()
+    try:
+        db.conn.execute("BEGIN")
 
-    for row in source_rows:
-        if row["conversation_id"]:
+        merged_memory_id, _ = _upsert_preference_exact(
+            category=category,
+            key=key,
+            value=merged_value[:1000],
+            confidence=merged_confidence,
+            priority=merged_priority,
+            client_rules_json=_serialize_client_rules(merged_rules),
+            status="active",
+        )
+        source_rows = db.conn.execute(
+            """
+            SELECT DISTINCT conversation_id
+            FROM preference_sources
+            WHERE memory_id IN (?, ?)
+            """,
+            (payload.left_id, payload.right_id),
+        ).fetchall()
+
+        for row in source_rows:
+            if row["conversation_id"]:
+                db.conn.execute(
+                    """
+                    INSERT OR IGNORE INTO preference_sources (memory_id, conversation_id, created_at)
+                    VALUES (?, ?, ?)
+                    """,
+                    (merged_memory_id, row["conversation_id"], datetime.now().isoformat()),
+                )
+
+        # Cycle detection for lineage records
+        def _would_create_cycle(child_id: int, parent_id: int) -> bool:
+            """Check if adding child->parent lineage would create a cycle."""
+            visited = set()
+            stack = [parent_id]
+            while stack:
+                current = stack.pop()
+                if current == child_id:
+                    return True
+                if current in visited:
+                    continue
+                visited.add(current)
+                ancestors = db.conn.execute(
+                    "SELECT parent_memory_id FROM preference_lineage WHERE child_memory_id = ?",
+                    (current,),
+                ).fetchall()
+                for ancestor_row in ancestors:
+                    stack.append(int(ancestor_row["parent_memory_id"]))
+            return False
+
+        for parent_id in (payload.left_id, payload.right_id):
+            if int(parent_id) == merged_memory_id:
+                continue
+            if _would_create_cycle(merged_memory_id, parent_id):
+                logger.warning(
+                    "Skipping lineage record %d->%d: would create cycle",
+                    merged_memory_id, parent_id,
+                )
+                continue
             db.conn.execute(
                 """
-                INSERT OR IGNORE INTO preference_sources (memory_id, conversation_id, created_at)
-                VALUES (?, ?, ?)
+                INSERT OR IGNORE INTO preference_lineage (child_memory_id, parent_memory_id, relation_type, created_at)
+                VALUES (?, ?, ?, ?)
                 """,
-                (merged_memory_id, row["conversation_id"], datetime.now().isoformat()),
+                (merged_memory_id, parent_id, "merged", datetime.now().isoformat()),
             )
 
-    for parent_id in (payload.left_id, payload.right_id):
-        if int(parent_id) == merged_memory_id:
-            continue
-        db.conn.execute(
-            """
-            INSERT OR IGNORE INTO preference_lineage (child_memory_id, parent_memory_id, relation_type, created_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (merged_memory_id, parent_id, "merged", datetime.now().isoformat()),
-        )
+        deleted_source_ids: list[int] = []
+        if payload.delete_sources:
+            candidates = [payload.left_id, payload.right_id]
+            delete_ids = [memory_id for memory_id in candidates if int(memory_id) != merged_memory_id]
+            if delete_ids:
+                placeholders = ",".join("?" for _ in delete_ids)
+                db.conn.execute(
+                    f"DELETE FROM preference_lineage WHERE child_memory_id IN ({placeholders}) OR parent_memory_id IN ({placeholders})",
+                    (*delete_ids, *delete_ids),
+                )
+                db.conn.execute(
+                    f"DELETE FROM preference_usage WHERE memory_id IN ({placeholders})",
+                    tuple(delete_ids),
+                )
+                db.conn.execute(
+                    f"DELETE FROM preference_sources WHERE memory_id IN ({placeholders})",
+                    tuple(delete_ids),
+                )
+                db.conn.execute(
+                    f"DELETE FROM preferences WHERE id IN ({placeholders})",
+                    tuple(delete_ids),
+                )
+                deleted_source_ids = delete_ids
 
-    deleted_source_ids: list[int] = []
-    if payload.delete_sources:
-        candidates = [payload.left_id, payload.right_id]
-        delete_ids = [memory_id for memory_id in candidates if int(memory_id) != merged_memory_id]
-        if delete_ids:
-            placeholders = ",".join("?" for _ in delete_ids)
-            db.conn.execute(
-                f"DELETE FROM preference_lineage WHERE child_memory_id IN ({placeholders}) OR parent_memory_id IN ({placeholders})",
-                (*delete_ids, *delete_ids),
-            )
-            db.conn.execute(
-                f"DELETE FROM preference_usage WHERE memory_id IN ({placeholders})",
-                tuple(delete_ids),
-            )
-            db.conn.execute(
-                f"DELETE FROM preference_sources WHERE memory_id IN ({placeholders})",
-                tuple(delete_ids),
-            )
-            db.conn.execute(
-                f"DELETE FROM preferences WHERE id IN ({placeholders})",
-                tuple(delete_ids),
-            )
-            deleted_source_ids = delete_ids
-    db.conn.commit()
+        db.conn.execute("COMMIT")
+    except Exception:
+        db.conn.execute("ROLLBACK")
+        raise
 
     return {
         "status": "ok",

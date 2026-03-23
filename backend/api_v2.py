@@ -130,6 +130,10 @@ async def ingest_conversation(payload: ConversationV2Input):
     if not messages_dicts:
         raise HTTPException(status_code=400, detail="At least one message is required")
 
+    MAX_MESSAGES = 10000
+    if len(messages_dicts) > MAX_MESSAGES:
+        raise HTTPException(status_code=413, detail=f"Too many messages: {len(messages_dicts)}, max {MAX_MESSAGES}")
+
     # Derive summary
     summary = _derive_summary_v2(
         messages_dicts,

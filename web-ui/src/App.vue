@@ -18,11 +18,12 @@
         </div>
 
         <div class="mb-3 text-[10px] font-semibold uppercase tracking-[0.24em] text-stone-400">{{ t('browse') }}</div>
-        <nav class="space-y-1.5">
+        <nav role="navigation" class="space-y-1.5">
           <router-link
             v-for="item in navItems"
             :key="item.path"
             :to="item.path"
+            :aria-label="item.label"
             :class="[
               'group flex items-center justify-between rounded-2xl px-3.5 py-3 transition-all duration-200',
               isActive(item.path)
@@ -103,11 +104,12 @@
               {{ option.label }}
             </button>
           </div>
-          <nav class="mt-4 flex gap-2 overflow-x-auto pb-1">
+          <nav role="navigation" class="mt-4 flex gap-2 overflow-x-auto pb-1">
             <router-link
               v-for="item in navItems"
               :key="item.path"
               :to="item.path"
+              :aria-label="item.label"
               :class="[
                 'whitespace-nowrap rounded-full px-4 py-2 text-sm font-medium transition-colors',
                 isActive(item.path)
@@ -121,7 +123,7 @@
         </div>
       </header>
 
-      <main class="px-4 pb-8 pt-4 lg:px-6 lg:pb-10 lg:pt-5 xl:px-8">
+      <main role="main" class="px-4 pb-8 pt-4 lg:px-6 lg:pb-10 lg:pt-5 xl:px-8">
         <router-view />
       </main>
     </div>

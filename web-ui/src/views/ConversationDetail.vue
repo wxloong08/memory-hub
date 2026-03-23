@@ -782,10 +782,24 @@ function normalizeMessageContent(content) {
     .trim()
 }
 
+function sanitizeHtml(html) {
+  const div = document.createElement('div')
+  div.innerHTML = html
+  div.querySelectorAll('script,iframe,object,embed,form,style,link').forEach(el => el.remove())
+  div.querySelectorAll('*').forEach(el => {
+    for (const attr of [...el.attributes]) {
+      if (attr.name.startsWith('on') || attr.name === 'srcdoc' || (attr.name === 'href' && attr.value.trim().toLowerCase().startsWith('javascript:'))) {
+        el.removeAttribute(attr.name)
+      }
+    }
+  })
+  return div.innerHTML
+}
+
 function renderMessageHtml(content, role = 'assistant') {
   const normalized = preprocessMarkdownSource(normalizeMessageContent(content))
   const blocks = finalizeMarkdownBlocks(parseMarkdownBlocks(normalized))
-  return blocks.map(renderMarkdownBlock).join('')
+  return sanitizeHtml(blocks.map(renderMarkdownBlock).join(''))
 }
 
 function preprocessMarkdownSource(content) {
@@ -1062,7 +1076,7 @@ async function loadData(id) {
     selectedMemoryTier.value = String(conv?.memory_tier || 'temporary')
   } catch (e) {
     if (thisRequest !== loadRequestId) return
-    error.value = `Failed to load conversation: ${e.message}`
+    error.value = t('failedToLoadConversation', { message: e.message })
   } finally {
     if (thisRequest === loadRequestId) loading.value = false
   }
@@ -1136,7 +1150,7 @@ async function runAnalysis() {
       conversation.value = { ...conversation.value, summary: analysis.value.summary }
     }
   } catch (e) {
-    analysisError.value = `Failed to analyze conversation: ${e.message}`
+    analysisError.value = t('analyzeConversationFailed', { message: e.message })
   } finally {
     analyzing.value = false
   }
