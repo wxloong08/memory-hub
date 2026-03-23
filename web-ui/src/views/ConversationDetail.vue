@@ -53,6 +53,14 @@
               </label>
               <button
                 type="button"
+                class="rounded-full bg-[var(--brand)] px-4 py-2 text-sm font-medium text-white ring-1 ring-[var(--brand)] transition-colors hover:bg-[var(--brand-deep)] disabled:opacity-50"
+                :disabled="analyzing"
+                @click="runAnalysis"
+              >
+                {{ analyzing ? t('analyzing') : t('analyze') }}
+              </button>
+              <button
+                type="button"
                 class="rounded-full bg-white/85 px-4 py-2 text-sm font-medium text-stone-700 ring-1 ring-stone-200/80 transition-colors hover:bg-stone-50 disabled:opacity-50"
                 :disabled="extractingMemories"
                 @click="extractMemories"
@@ -589,7 +597,7 @@ const loadingRelated = ref(true)
 const error = ref(null)
 const actionError = ref(null)
 const showContent = ref(false)
-const showDetails = ref(false)
+const showDetails = ref(true)
 const analyzing = ref(false)
 const analysis = ref(null)
 const analysisError = ref(null)

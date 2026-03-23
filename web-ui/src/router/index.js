@@ -5,6 +5,7 @@ const routes = [
   { path: '/conversations', component: () => import('../views/Conversations.vue') },
   { path: '/conversations/:id', component: () => import('../views/ConversationDetail.vue') },
   { path: '/search', component: () => import('../views/Search.vue') },
+  { path: '/memories', component: () => import('../views/Memories.vue') },
   { path: '/settings', component: () => import('../views/Settings.vue') },
   { path: '/switch', component: () => import('../views/SwitchCenter.vue') },
   { path: '/:pathMatch(.*)*', redirect: '/' },

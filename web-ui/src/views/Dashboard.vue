@@ -35,6 +35,45 @@
       </div>
 
       <div class="memory-panel rounded-[26px] p-5 lg:p-6">
+        <div class="text-[11px] font-semibold uppercase tracking-[0.2em] text-stone-400">{{ t('dashboardQuickActions') }}</div>
+        <h3 class="mt-2 text-xl font-semibold text-stone-900">{{ t('dashboardQuickActions') }}</h3>
+        <div class="mt-5 grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+          <router-link
+            to="/conversations"
+            class="group rounded-2xl bg-white/70 px-4 py-4 ring-1 ring-stone-200/70 transition-all hover:-translate-y-0.5 hover:bg-white hover:shadow-md"
+          >
+            <div class="text-lg">☰</div>
+            <div class="mt-2 text-sm font-medium text-stone-800 group-hover:text-stone-900">{{ t('navThreads') }}</div>
+            <div class="mt-1 text-xs leading-5 text-stone-500">{{ t('dashboardBrowseHint') }}</div>
+          </router-link>
+          <router-link
+            to="/memories"
+            class="group rounded-2xl bg-white/70 px-4 py-4 ring-1 ring-stone-200/70 transition-all hover:-translate-y-0.5 hover:bg-white hover:shadow-md"
+          >
+            <div class="text-lg">◆</div>
+            <div class="mt-2 text-sm font-medium text-stone-800 group-hover:text-stone-900">{{ t('navMemories') }}</div>
+            <div class="mt-1 text-xs leading-5 text-stone-500">{{ t('dashboardMemoryHint') }}</div>
+          </router-link>
+          <router-link
+            to="/settings"
+            class="group rounded-2xl bg-white/70 px-4 py-4 ring-1 ring-stone-200/70 transition-all hover:-translate-y-0.5 hover:bg-white hover:shadow-md"
+          >
+            <div class="text-lg">⚙</div>
+            <div class="mt-2 text-sm font-medium text-stone-800 group-hover:text-stone-900">{{ t('navSettings') }}</div>
+            <div class="mt-1 text-xs leading-5 text-stone-500">{{ t('dashboardImportHint') }}</div>
+          </router-link>
+          <router-link
+            to="/switch"
+            class="group rounded-2xl bg-white/70 px-4 py-4 ring-1 ring-stone-200/70 transition-all hover:-translate-y-0.5 hover:bg-white hover:shadow-md"
+          >
+            <div class="text-lg">⇄</div>
+            <div class="mt-2 text-sm font-medium text-stone-800 group-hover:text-stone-900">{{ t('navSwitch') }}</div>
+            <div class="mt-1 text-xs leading-5 text-stone-500">{{ t('dashboardSwitchHint') }}</div>
+          </router-link>
+        </div>
+      </div>
+
+      <div class="memory-panel rounded-[26px] p-5 lg:p-6">
         <div class="text-[11px] font-semibold uppercase tracking-[0.2em] text-stone-400">{{ t('dashboardBreakdown') }}</div>
         <h3 class="mt-2 text-xl font-semibold text-stone-900">{{ t('dashboardPlatformActivity') }}</h3>
         <div class="mt-5 space-y-4">

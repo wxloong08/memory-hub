@@ -140,11 +140,12 @@ let healthInterval = null
 const { locale, setLocale, t } = useI18n()
 
 const navItems = computed(() => ([
-  { path: '/', icon: 'OV', label: t('navOverview') },
-  { path: '/conversations', icon: 'TH', label: t('navThreads') },
-  { path: '/search', icon: 'SR', label: t('navSearch') },
-  { path: '/switch', icon: 'SW', label: t('navSwitch') },
-  { path: '/settings', icon: 'CF', label: t('navSettings') },
+  { path: '/', icon: '◎', label: t('navOverview') },
+  { path: '/conversations', icon: '☰', label: t('navThreads') },
+  { path: '/search', icon: '⌕', label: t('navSearch') },
+  { path: '/memories', icon: '◆', label: t('navMemories') },
+  { path: '/switch', icon: '⇄', label: t('navSwitch') },
+  { path: '/settings', icon: '⚙', label: t('navSettings') },
 ]))
 
 const localeOptions = computed(() => ([

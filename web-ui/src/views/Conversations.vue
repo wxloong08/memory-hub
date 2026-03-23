@@ -13,124 +13,141 @@
           </div>
         </div>
 
-        <div class="flex flex-col gap-3 sm:flex-row sm:flex-wrap sm:items-center">
-          <div class="rounded-full bg-white/80 px-4 py-2 text-sm text-stone-600 ring-1 ring-stone-200/70">
-            {{ t('visibleCount', { count: filteredConversations.length }) }}
-            <span v-if="conversations.length > 0">
-              · {{ t('loadedCount', { loaded: conversations.length, total: totalAvailable || conversations.length }) }}
-            </span>
+        <div class="flex flex-col gap-3">
+          <!-- Row 1: Essential filters (always visible) -->
+          <div class="flex flex-wrap items-center gap-3">
+            <label class="inline-flex items-center gap-3 rounded-full bg-white/80 px-4 py-2 ring-1 ring-stone-200/70">
+              <span class="text-sm text-stone-500">{{ t('quickFilter') }}</span>
+              <input
+                v-model="quickFilter"
+                type="text"
+                :placeholder="t('quickFilterPlaceholder')"
+                class="min-w-[220px] border-0 bg-transparent text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-0"
+              />
+            </label>
+            <label class="inline-flex items-center gap-3 rounded-full bg-white/80 px-4 py-2 ring-1 ring-stone-200/70">
+              <span class="text-sm text-stone-500">{{ t('platform') }}</span>
+              <select
+                v-model="selectedPlatform"
+                class="border-0 bg-transparent pr-6 text-sm font-medium text-stone-900 focus:outline-none focus:ring-0"
+              >
+                <option value="">{{ t('all') }}</option>
+                <option v-for="p in platforms" :key="p" :value="p">{{ platformEmoji(p) }} {{ p }}</option>
+              </select>
+            </label>
+            <label class="inline-flex items-center gap-3 rounded-full bg-white/80 px-4 py-2 ring-1 ring-stone-200/70">
+              <span class="text-sm text-stone-500">{{ t('timeRange') }}</span>
+              <select
+                v-model="selectedTimeRange"
+                class="border-0 bg-transparent pr-6 text-sm font-medium text-stone-900 focus:outline-none focus:ring-0"
+              >
+                <option value="all">{{ t('timeRangeAll') }}</option>
+                <option value="24h">{{ t('timeRange24h') }}</option>
+                <option value="7d">{{ t('timeRange7d') }}</option>
+                <option value="30d">{{ t('timeRange30d') }}</option>
+              </select>
+            </label>
+            <label class="inline-flex items-center gap-3 rounded-full bg-white/80 px-4 py-2 ring-1 ring-stone-200/70">
+              <span class="text-sm text-stone-500">{{ t('sortBy') }}</span>
+              <select
+                v-model="selectedSort"
+                class="border-0 bg-transparent pr-6 text-sm font-medium text-stone-900 focus:outline-none focus:ring-0"
+              >
+                <option value="newest">{{ t('sortNewest') }}</option>
+                <option value="oldest">{{ t('sortOldest') }}</option>
+                <option value="importance">{{ t('sortImportance') }}</option>
+                <option value="ai_summary">{{ t('sortAiSummary') }}</option>
+              </select>
+            </label>
+            <button
+              @click="showAdvancedFilters = !showAdvancedFilters"
+              class="rounded-full bg-white/80 px-4 py-2 text-sm font-medium text-stone-600 ring-1 ring-stone-200/70 transition-colors hover:bg-white"
+            >
+              {{ showAdvancedFilters ? '\u25B2 ' + t('hideAdvancedFilters') : '\u25BC ' + t('showAdvancedFilters') }}
+            </button>
           </div>
-          <button
-            @click="summarizeVisibleConversations"
-            :disabled="loading || summarizing || filteredConversations.length === 0"
-            class="rounded-full bg-stone-900 px-4 py-2 text-sm font-medium text-stone-50 transition-colors hover:bg-stone-800 disabled:opacity-50"
-          >
-            {{ summarizing ? t('summarizingVisible') : t('summarizeVisible') }}
-          </button>
-          <button
-            @click="summarizeUnreadableConversations"
-            :disabled="loading || summarizing || filteredConversations.length === 0"
-            class="rounded-full bg-white px-4 py-2 text-sm font-medium text-stone-700 ring-1 ring-stone-200 transition-colors hover:bg-stone-50 disabled:opacity-50"
-          >
-            {{ summarizing ? t('summarizingVisible') : t('summarizeUnreadable') }}
-          </button>
-          <label class="inline-flex items-center gap-3 rounded-full bg-white/80 px-4 py-2 ring-1 ring-stone-200/70">
-            <span class="text-sm text-stone-500">{{ t('quickFilter') }}</span>
-            <input
-              v-model="quickFilter"
-              type="text"
-              :placeholder="t('quickFilterPlaceholder')"
-              class="min-w-[220px] border-0 bg-transparent text-sm font-medium text-stone-900 placeholder:text-stone-400 focus:outline-none focus:ring-0"
-            />
-          </label>
-          <label class="inline-flex items-center gap-3 rounded-full bg-white/80 px-4 py-2 ring-1 ring-stone-200/70">
-            <span class="text-sm text-stone-500">{{ t('platform') }}</span>
-            <select
-              v-model="selectedPlatform"
-              class="border-0 bg-transparent pr-6 text-sm font-medium text-stone-900 focus:outline-none focus:ring-0"
+
+          <!-- Row 2: Advanced filters (toggleable) -->
+          <div v-if="showAdvancedFilters" class="flex flex-wrap items-center gap-3">
+            <label class="inline-flex items-center gap-3 rounded-full bg-white/80 px-4 py-2 ring-1 ring-stone-200/70">
+              <span class="text-sm text-stone-500">{{ t('modelFilter') }}</span>
+              <select
+                v-model="selectedModel"
+                class="border-0 bg-transparent pr-6 text-sm font-medium text-stone-900 focus:outline-none focus:ring-0"
+              >
+                <option value="">{{ t('all') }}</option>
+                <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
+              </select>
+            </label>
+            <label class="inline-flex items-center gap-3 rounded-full bg-white/80 px-4 py-2 ring-1 ring-stone-200/70">
+              <span class="text-sm text-stone-500">{{ t('summarySource') }}</span>
+              <select
+                v-model="selectedSummarySource"
+                class="border-0 bg-transparent pr-6 text-sm font-medium text-stone-900 focus:outline-none focus:ring-0"
+              >
+                <option value="">{{ t('all') }}</option>
+                <option v-for="source in summarySources" :key="source" :value="source">
+                  {{ summarySourceLabel(source) }}
+                </option>
+              </select>
+            </label>
+            <label class="inline-flex items-center gap-3 rounded-full bg-white/80 px-4 py-2 ring-1 ring-stone-200/70">
+              <span class="text-sm text-stone-500">{{ t('recoveryMode') }}</span>
+              <select
+                v-model="selectedRecoveryMode"
+                class="border-0 bg-transparent pr-6 text-sm font-medium text-stone-900 focus:outline-none focus:ring-0"
+              >
+                <option value="">{{ t('all') }}</option>
+                <option v-for="mode in recoveryModes" :key="mode" :value="mode">
+                  {{ recoveryModeLabel(mode) }}
+                </option>
+              </select>
+            </label>
+            <label class="inline-flex items-center gap-3 rounded-full bg-white/80 px-4 py-2 ring-1 ring-stone-200/70">
+              <span class="text-sm text-stone-500">{{ t('memoryTier') }}</span>
+              <select
+                v-model="selectedMemoryTier"
+                class="border-0 bg-transparent pr-6 text-sm font-medium text-stone-900 focus:outline-none focus:ring-0"
+              >
+                <option value="">{{ t('all') }}</option>
+                <option v-for="tier in memoryTiers" :key="tier" :value="tier">{{ memoryTierLabel(tier) }}</option>
+              </select>
+            </label>
+            <label class="inline-flex items-center gap-3 rounded-full bg-white/80 px-4 py-2 ring-1 ring-stone-200/70">
+              <span class="text-sm text-stone-500">{{ t('density') }}</span>
+              <select
+                v-model="selectedDensity"
+                class="border-0 bg-transparent pr-6 text-sm font-medium text-stone-900 focus:outline-none focus:ring-0"
+              >
+                <option value="comfortable">{{ t('densityComfortable') }}</option>
+                <option value="compact">{{ t('densityCompact') }}</option>
+              </select>
+            </label>
+          </div>
+
+          <!-- Row 3: Status + Actions (always visible, but less prominent) -->
+          <div class="flex flex-wrap items-center gap-3">
+            <div class="rounded-full bg-white/80 px-4 py-2 text-sm text-stone-600 ring-1 ring-stone-200/70">
+              {{ t('visibleCount', { count: filteredConversations.length }) }}
+              <span v-if="conversations.length > 0">
+                · {{ t('loadedCount', { loaded: conversations.length, total: totalAvailable || conversations.length }) }}
+              </span>
+            </div>
+            <button
+              @click="summarizeVisibleConversations"
+              :disabled="loading || summarizing || filteredConversations.length === 0"
+              class="rounded-full bg-stone-900 px-3 py-1.5 text-xs font-medium text-stone-50 transition-colors hover:bg-stone-800 disabled:opacity-50"
             >
-              <option value="">{{ t('all') }}</option>
-              <option v-for="p in platforms" :key="p" :value="p">{{ platformEmoji(p) }} {{ p }}</option>
-            </select>
-          </label>
-          <label class="inline-flex items-center gap-3 rounded-full bg-white/80 px-4 py-2 ring-1 ring-stone-200/70">
-            <span class="text-sm text-stone-500">{{ t('modelFilter') }}</span>
-            <select
-              v-model="selectedModel"
-              class="border-0 bg-transparent pr-6 text-sm font-medium text-stone-900 focus:outline-none focus:ring-0"
+              {{ summarizing ? t('summarizingVisible') : t('summarizeVisible') }}
+            </button>
+            <button
+              @click="summarizeUnreadableConversations"
+              :disabled="loading || summarizing || filteredConversations.length === 0"
+              class="rounded-full bg-white px-3 py-1.5 text-xs font-medium text-stone-700 ring-1 ring-stone-200 transition-colors hover:bg-stone-50 disabled:opacity-50"
             >
-              <option value="">{{ t('all') }}</option>
-              <option v-for="m in models" :key="m" :value="m">{{ m }}</option>
-            </select>
-          </label>
-          <label class="inline-flex items-center gap-3 rounded-full bg-white/80 px-4 py-2 ring-1 ring-stone-200/70">
-            <span class="text-sm text-stone-500">{{ t('summarySource') }}</span>
-            <select
-              v-model="selectedSummarySource"
-              class="border-0 bg-transparent pr-6 text-sm font-medium text-stone-900 focus:outline-none focus:ring-0"
-            >
-              <option value="">{{ t('all') }}</option>
-              <option v-for="source in summarySources" :key="source" :value="source">
-                {{ summarySourceLabel(source) }}
-              </option>
-            </select>
-          </label>
-          <label class="inline-flex items-center gap-3 rounded-full bg-white/80 px-4 py-2 ring-1 ring-stone-200/70">
-            <span class="text-sm text-stone-500">{{ t('recoveryMode') }}</span>
-            <select
-              v-model="selectedRecoveryMode"
-              class="border-0 bg-transparent pr-6 text-sm font-medium text-stone-900 focus:outline-none focus:ring-0"
-            >
-              <option value="">{{ t('all') }}</option>
-              <option v-for="mode in recoveryModes" :key="mode" :value="mode">
-                {{ recoveryModeLabel(mode) }}
-              </option>
-            </select>
-          </label>
-          <label class="inline-flex items-center gap-3 rounded-full bg-white/80 px-4 py-2 ring-1 ring-stone-200/70">
-            <span class="text-sm text-stone-500">{{ t('memoryTier') }}</span>
-            <select
-              v-model="selectedMemoryTier"
-              class="border-0 bg-transparent pr-6 text-sm font-medium text-stone-900 focus:outline-none focus:ring-0"
-            >
-              <option value="">{{ t('all') }}</option>
-              <option v-for="tier in memoryTiers" :key="tier" :value="tier">{{ memoryTierLabel(tier) }}</option>
-            </select>
-          </label>
-          <label class="inline-flex items-center gap-3 rounded-full bg-white/80 px-4 py-2 ring-1 ring-stone-200/70">
-            <span class="text-sm text-stone-500">{{ t('timeRange') }}</span>
-            <select
-              v-model="selectedTimeRange"
-              class="border-0 bg-transparent pr-6 text-sm font-medium text-stone-900 focus:outline-none focus:ring-0"
-            >
-              <option value="all">{{ t('timeRangeAll') }}</option>
-              <option value="24h">{{ t('timeRange24h') }}</option>
-              <option value="7d">{{ t('timeRange7d') }}</option>
-              <option value="30d">{{ t('timeRange30d') }}</option>
-            </select>
-          </label>
-          <label class="inline-flex items-center gap-3 rounded-full bg-white/80 px-4 py-2 ring-1 ring-stone-200/70">
-            <span class="text-sm text-stone-500">{{ t('sortBy') }}</span>
-            <select
-              v-model="selectedSort"
-              class="border-0 bg-transparent pr-6 text-sm font-medium text-stone-900 focus:outline-none focus:ring-0"
-            >
-              <option value="newest">{{ t('sortNewest') }}</option>
-              <option value="oldest">{{ t('sortOldest') }}</option>
-              <option value="importance">{{ t('sortImportance') }}</option>
-              <option value="ai_summary">{{ t('sortAiSummary') }}</option>
-            </select>
-          </label>
-          <label class="inline-flex items-center gap-3 rounded-full bg-white/80 px-4 py-2 ring-1 ring-stone-200/70">
-            <span class="text-sm text-stone-500">{{ t('density') }}</span>
-            <select
-              v-model="selectedDensity"
-              class="border-0 bg-transparent pr-6 text-sm font-medium text-stone-900 focus:outline-none focus:ring-0"
-            >
-              <option value="comfortable">{{ t('densityComfortable') }}</option>
-              <option value="compact">{{ t('densityCompact') }}</option>
-            </select>
-          </label>
+              {{ summarizing ? t('summarizingVisible') : t('summarizeUnreadable') }}
+            </button>
+          </div>
         </div>
       </div>
     </div>
@@ -271,6 +288,7 @@ const selectedTimeRange = ref('all')
 const selectedSort = ref('newest')
 const selectedDensity = ref('comfortable')
 const quickFilter = ref('')
+const showAdvancedFilters = ref(false)
 const loading = ref(true)
 const error = ref(null)
 const summarizing = ref(false)
