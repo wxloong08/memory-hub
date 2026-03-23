@@ -12,6 +12,13 @@ const DEDUP_WINDOW_MS = 5 * 60 * 1000; // 5 minutes
 // Dedup map: key = platform + url + messageCount hash, value = timestamp
 const recentSyncs = new Map();
 
+setInterval(() => {
+  const now = Date.now();
+  for (const [k, ts] of recentSyncs) {
+    if (now - ts > DEDUP_WINDOW_MS) recentSyncs.delete(k);
+  }
+}, 10 * 60 * 1000);
+
 /**
  * Detect which extractor class is available in the global scope.
  * The manifest loads exactly one platform extractor per content_scripts entry.
@@ -153,11 +160,17 @@ async function syncConversation(conversation, force) {
     working_dir: null
   };
 
+  const payloadStr = JSON.stringify(payload);
+  if (payloadStr.length > 10 * 1024 * 1024) {
+    return { success: false, error: `Conversation too large (${(payloadStr.length / 1024 / 1024).toFixed(1)}MB)` };
+  }
+
   try {
     const response = await fetch(`${MEMORY_HUB_URL}/api/conversations`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(payload)
+      body: payloadStr,
+      signal: AbortSignal.timeout(30000)
     });
 
     if (response.ok) {

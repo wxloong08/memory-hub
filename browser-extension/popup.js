@@ -57,7 +57,7 @@ document.addEventListener('DOMContentLoaded', async () => {
   setInterval(async () => {
     await checkConnection();
     await getConversationStatus();
-  }, 5000);
+  }, 15000);
 });
 
 /**
@@ -204,10 +204,10 @@ async function handleSync() {
     } else if (response.error === 'duplicate') {
       resetSyncBtn('Already synced');
     } else {
-      resetSyncBtn('Sync failed');
+      resetSyncBtn(response?.error || 'Sync failed');
     }
   } catch (error) {
-    resetSyncBtn('Error');
+    resetSyncBtn(error.message || 'Error');
   }
 }
 
@@ -260,7 +260,7 @@ function resetSyncBtn(tempLabel) {
     setTimeout(() => {
       syncBtnEl.textContent = 'Sync Now';
       updateSyncButtonState();
-    }, 2000);
+    }, 5000);
   } else {
     syncBtnEl.textContent = 'Sync Now';
     updateSyncButtonState();

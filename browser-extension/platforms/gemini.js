@@ -86,7 +86,7 @@ class GeminiExtractor extends PlatformExtractor {
 
   _extractContext() {
     return {
-      title: document.title.replace(/\s*-\s*Gemini.*$/, '').trim() || 'Gemini Conversation',
+      title: (document.title || '').replace(/\s*-\s*Gemini.*$/, '').trim() || 'Gemini Conversation',
       conversationId: null
     };
   }

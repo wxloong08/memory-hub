@@ -95,7 +95,7 @@ class DeepSeekExtractor extends PlatformExtractor {
   _extractContext() {
     const match = window.location.pathname.match(/\/chat\/([a-zA-Z0-9-]+)/);
     return {
-      title: document.title.replace(/\s*-\s*DeepSeek.*$/, '').trim() || 'DeepSeek Conversation',
+      title: (document.title || '').replace(/\s*-\s*DeepSeek.*$/, '').trim() || 'DeepSeek Conversation',
       conversationId: match ? match[1] : null
     };
   }

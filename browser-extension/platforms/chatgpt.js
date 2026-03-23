@@ -69,7 +69,7 @@ class ChatGPTExtractor extends PlatformExtractor {
   _extractContext() {
     const match = window.location.pathname.match(/\/c\/([a-zA-Z0-9-]+)/);
     return {
-      title: document.title.replace(/\s*\|\s*ChatGPT.*$/, '').trim() || 'ChatGPT Conversation',
+      title: (document.title || '').replace(/\s*\|\s*ChatGPT.*$/, '').trim() || 'ChatGPT Conversation',
       conversationId: match ? match[1] : null
     };
   }

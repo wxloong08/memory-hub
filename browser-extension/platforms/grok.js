@@ -65,7 +65,7 @@ class GrokExtractor extends PlatformExtractor {
   _extractContext() {
     const match = window.location.pathname.match(/\/i\/grok\/([a-zA-Z0-9-]+)/);
     return {
-      title: document.title.replace(/\s*-\s*Grok.*$/, '').trim() || 'Grok Conversation',
+      title: (document.title || '').replace(/\s*-\s*Grok.*$/, '').trim() || 'Grok Conversation',
       conversationId: match ? match[1] : null
     };
   }
